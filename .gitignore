@@ -1,0 +1,85 @@
+# NHIT File Process — track Python source only.
+#
+# This repo is scripts-only in git. Keep local:
+#   - VRN / lifecycle CSV & Excel inputs (Exempt Query/Daroda_lc_vrn_files/, lcy/, etc.)
+#   - Merge & normalization outputs (*.csv, normalized_and_merged_*.csv)
+#   - Pass file splits (pass_files/, pass_output/)
+#   - Portal upload/process folders (Portal/File_Process/)
+#   - Rates / working Excel (mudi_mp.xlsx, Bjp_LT.xlsx, local code - plaza wise.xlsx)
+#   - Secrets (.env)
+
+# --- Track only Python (+ minimal repo metadata) ---
+*
+!*/
+!**/*.py
+!.gitignore
+!.env.example
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Excel (all common formats + lock files) ---
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.xltx
+*.xltm
+~$*.xls*
+~$*.xlsx
+
+# --- Archives ---
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.gz
+
+# --- Tabular / data outputs ---
+*.csv
+*.tsv
+*.parquet
+*.feather
+
+# --- Cache & bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# --- Logs & OS junk ---
+*.log
+*.tmp
+*.temp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Merge / convert temp dirs (merge_files.py, Life_cycle_merge*.py) ---
+life_cycle_merge_*/
+
+# --- Portal runtime data (uploads, merged outputs, lookup results) ---
+Portal/File_Process/
+
+# --- Local input/output folders (scripts read/write here; not versioned) ---
+Exempt Query/Daroda_lc_vrn_files/
+Exempt Query/pass_files/
+Exempt Query/pass_output/
+Exempt Query/lcy/
+valid invalid script/pullur valid invalid output/
+Life Cycle Report/
