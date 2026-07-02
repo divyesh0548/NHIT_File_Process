@@ -1,6 +1,6 @@
 import pandas as pd
 import sys
-from config import get_file_path, get_base_output_path  # Import the new function
+from config import get_file_path, output_path
 from data_processing import load_and_preprocess_data
 
 def process_side(df, exempt_vehicle_list, side):
@@ -70,13 +70,7 @@ def main():
     # Combine and save results
     final_result = pd.concat([result_side_1, result_side_2])
 
-    # Get the base output path
-    base_output_path = get_base_output_path()  # Get the base output directory
-
-    # Construct the full output path
-    output_file_path = f"{base_output_path}/updated_new_Combined_Side_Results.xlsx"  # Change as necessary for your structure
-
-    # Save the final results to the specified output path
+    output_file_path = output_path("updated_new_Combined_Side_Results.xlsx")
     final_result.to_excel(output_file_path, index=False)
 
     print(f"Filtered DataFrame with updated column names has been saved to '{output_file_path}'.")

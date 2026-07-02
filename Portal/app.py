@@ -6,16 +6,28 @@ import threading
 import time
 import json
 
+from dotenv import load_dotenv
 from flask import Flask, abort, jsonify, render_template, request, send_file, session
 import pandas as pd
 from werkzeug.utils import secure_filename
 
+from db.nhit_file_process import (
+    LC_ETC_FILE_TYPE,
+    add_header_keyword,
+    delete_header_keyword,
+    get_lc_etc_header_keyword_records,
+    get_lc_etc_header_keyword_strings,
+    update_header_keyword,
+)
 from Header_Mapping.header_mapping import (
-    LIFE_CYCLE_MERGE_HEADER_KEYWORDS,
     VALID_INVALID_LOOKUP_HEADER_MAPPING,
     VALID_INVALID_LOOKUP_REQUIRED_COLUMNS,
 )
 from Scripts.Life_cycle_merge import _detect_header_row_index, merge_files_in_folder
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(REPO_ROOT / ".env")
 
 
 app = Flask(__name__)
@@ -24,13 +36,33 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-change-for-p
 
 ALLOWED_EXTENSIONS = {".xlsx", ".csv", ".xls"}
 FILE_PROCESS_DIR = Path(__file__).resolve().parent / "File_Process"
-LIFE_CYCLE_PROCESS_FOLDER = "Life_Cycle_Merge"
-VALID_INVALID_PROCESS_FOLDER = "Valid_Invalid_Lookup"
-VALID_INVALID_HEADER_SCAN_ROWS = 50
+
+# Top-level process groups under File_Process/
+MERGE_VALID_LOOKUP_PARENT_FOLDER = "Merge_Valid_Lookup"
+EXEMPT_QUERY_PARENT_FOLDER = "Exempt_Query"
+
+# Sub-processes under Merge_Valid_Lookup/
+LIFE_CYCLE_SUBPROCESS_FOLDER = "Life_Cycle_Merge"
+VALID_INVALID_SUBPROCESS_FOLDER = "Valid_Invalid_Lookup"
+
+# Backward-compatible names used in process state and routing checks
+LIFE_CYCLE_PROCESS_FOLDER = LIFE_CYCLE_SUBPROCESS_FOLDER
+VALID_INVALID_PROCESS_FOLDER = VALID_INVALID_SUBPROCESS_FOLDER
+
+# Display name for the parent process group (distinct from the Valid/Invalid Lookup sub-process)
+MERGE_VALID_LOOKUP_GROUP_LABEL = "Merge + Valid lookup"
+
+VIL_HEADER_MAPPING_FILENAME = "header_mapping.json"
+MIN_LIFE_CYCLE_MERGE_FILES = 2
 
 FILE_PROCESS_DIR.mkdir(parents=True, exist_ok=True)
-(FILE_PROCESS_DIR / LIFE_CYCLE_PROCESS_FOLDER).mkdir(parents=True, exist_ok=True)
-(FILE_PROCESS_DIR / VALID_INVALID_PROCESS_FOLDER).mkdir(parents=True, exist_ok=True)
+(
+    FILE_PROCESS_DIR / MERGE_VALID_LOOKUP_PARENT_FOLDER / LIFE_CYCLE_SUBPROCESS_FOLDER
+).mkdir(parents=True, exist_ok=True)
+(
+    FILE_PROCESS_DIR / MERGE_VALID_LOOKUP_PARENT_FOLDER / VALID_INVALID_SUBPROCESS_FOLDER
+).mkdir(parents=True, exist_ok=True)
+(FILE_PROCESS_DIR / EXEMPT_QUERY_PARENT_FOLDER).mkdir(parents=True, exist_ok=True)
 
 life_cycle_state_lock = threading.Lock()
 life_cycle_state = {
@@ -57,24 +89,30 @@ def allowed_file(filename):
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def get_process_input_dir(process_type, process_name):
-    safe_process_type = secure_filename(process_type.strip())
+def get_process_input_dir(parent_folder, subprocess_folder, process_name):
+    """Resolve File_Process/<parent>/<subprocess>/<process_name>/input."""
+    safe_parent = secure_filename(parent_folder.strip())
+    safe_subprocess = secure_filename(subprocess_folder.strip())
     safe_process_name = secure_filename(process_name.strip())
-    if not safe_process_type or not safe_process_name:
+    if not safe_parent or not safe_subprocess or not safe_process_name:
         return None, None
-    process_dir = FILE_PROCESS_DIR / safe_process_type / safe_process_name
+    process_dir = FILE_PROCESS_DIR / safe_parent / safe_subprocess / safe_process_name
     return process_dir, process_dir / "input"
 
 
-def list_uploaded_files(process_type, process_name):
-    _, input_dir = get_process_input_dir(process_type, process_name)
+def list_uploaded_files(parent_folder, subprocess_folder, process_name):
+    _, input_dir = get_process_input_dir(parent_folder, subprocess_folder, process_name)
     if not input_dir or not input_dir.exists():
         return []
     return sorted([p.name for p in input_dir.iterdir() if p.is_file()], key=str.lower)
 
 
 def get_valid_invalid_paths(process_name):
-    process_dir, input_dir = get_process_input_dir(VALID_INVALID_PROCESS_FOLDER, process_name)
+    process_dir, input_dir = get_process_input_dir(
+        MERGE_VALID_LOOKUP_PARENT_FOLDER,
+        VALID_INVALID_SUBPROCESS_FOLDER,
+        process_name,
+    )
     if not process_dir or not input_dir:
         return None, None, None
     rate_dir = input_dir / "rate"
@@ -159,8 +197,8 @@ def inspect_valid_invalid_headers(file_path):
 
 
 def list_life_cycle_merge_output_files():
-    """Files under File_Process/Life_Cycle_Merge/<process>/output/ (allowed extensions only)."""
-    root = FILE_PROCESS_DIR / LIFE_CYCLE_PROCESS_FOLDER
+    """Files under File_Process/Merge_Valid_Lookup/Life_Cycle_Merge/<process>/output/."""
+    root = FILE_PROCESS_DIR / MERGE_VALID_LOOKUP_PARENT_FOLDER / LIFE_CYCLE_SUBPROCESS_FOLDER
     if not root.exists():
         return []
     results = []
@@ -195,9 +233,13 @@ def resolve_lcm_output_import_file(relative_path):
         rel_parts = target.relative_to(FILE_PROCESS_DIR.resolve()).parts
     except ValueError:
         return None
-    if len(rel_parts) < 4:
+    if len(rel_parts) < 5:
         return None
-    if rel_parts[0] != LIFE_CYCLE_PROCESS_FOLDER or rel_parts[2] != "output":
+    if (
+        rel_parts[0] != MERGE_VALID_LOOKUP_PARENT_FOLDER
+        or rel_parts[1] != LIFE_CYCLE_SUBPROCESS_FOLDER
+        or rel_parts[3] != "output"
+    ):
         return None
     if not allowed_file(target.name):
         return None
@@ -221,7 +263,20 @@ def get_vil_merged_preview_path(process_name):
     Path to inspect for header mapping: staged uploaded file, pending LCM import, or first file in VIL input.
     Returns (path_or_none, source_label) where source_label is 'upload', 'import', or 'uploaded'.
     """
+    pending_path, pending_source = get_vil_pending_merged_preview_path(process_name)
+    if pending_path:
+        return pending_path, pending_source
+
     _, input_dir, _ = get_valid_invalid_paths(process_name)
+    if input_dir and input_dir.exists():
+        merged_files = [p for p in input_dir.iterdir() if p.is_file()]
+        if merged_files:
+            return merged_files[0], "uploaded"
+    return None, None
+
+
+def get_vil_pending_merged_preview_path(process_name):
+    """Staged upload or pending LCM import only — not yet confirmed into input/."""
     stage_dir = get_valid_invalid_stage_dir(process_name)
     if stage_dir and stage_dir.exists():
         staged_files = [p for p in stage_dir.iterdir() if p.is_file()]
@@ -232,15 +287,121 @@ def get_vil_merged_preview_path(process_name):
         src = resolve_lcm_output_import_file(pending_rel)
         if src:
             return src, "import"
-    if input_dir and input_dir.exists():
-        merged_files = [p for p in input_dir.iterdir() if p.is_file()]
-        if merged_files:
-            return merged_files[0], "uploaded"
     return None, None
 
 
 def get_valid_invalid_header_info_for_ui(process_name):
     path, _src = get_vil_merged_preview_path(process_name)
+    if not path:
+        return None
+    return inspect_valid_invalid_headers(path)
+
+
+def get_vil_pending_header_info_for_ui(process_name):
+    path, _src = get_vil_pending_merged_preview_path(process_name)
+    if not path:
+        return None
+    return inspect_valid_invalid_headers(path)
+
+
+def _vil_header_mapping_read():
+    return session.get("vil_header_mapping") or {}
+
+
+def get_vil_header_mapping_path(process_name):
+    process_dir, _, _ = get_valid_invalid_paths(process_name)
+    if not process_dir:
+        return None
+    return process_dir / VIL_HEADER_MAPPING_FILENAME
+
+
+def load_vil_header_mapping_from_disk(process_name):
+    mapping_path = get_vil_header_mapping_path(process_name)
+    if not mapping_path or not mapping_path.is_file():
+        return {}
+    try:
+        data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in data.items()
+        if isinstance(key, str) and isinstance(value, str) and value
+    }
+
+
+def is_vil_header_mapping_complete(mapping):
+    return all(canonical in mapping for canonical in VALID_INVALID_LOOKUP_REQUIRED_COLUMNS)
+
+
+def vil_header_mapping_is_confirmed(process_name):
+    return is_vil_header_mapping_complete(load_vil_header_mapping_from_disk(process_name))
+
+
+def save_vil_header_mapping_to_disk(process_name, mapping):
+    mapping_path = get_vil_header_mapping_path(process_name)
+    if not mapping_path:
+        return False
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    mapping_path.write_text(json.dumps(dict(mapping), indent=2), encoding="utf-8")
+    return True
+
+
+def clear_vil_header_mapping_file(process_name):
+    mapping_path = get_vil_header_mapping_path(process_name)
+    if mapping_path and mapping_path.is_file():
+        mapping_path.unlink()
+
+
+def get_vil_header_mapping(process_name):
+    disk_mapping = load_vil_header_mapping_from_disk(process_name)
+    if disk_mapping:
+        return disk_mapping
+    stored = _vil_header_mapping_read().get(process_name) or {}
+    return dict(stored)
+
+
+def save_vil_header_mapping(process_name, mapping):
+    save_vil_header_mapping_to_disk(process_name, mapping)
+    mapping_store = dict(_vil_header_mapping_read())
+    mapping_store[process_name] = dict(mapping)
+    session["vil_header_mapping"] = mapping_store
+    session.modified = True
+
+
+def clear_vil_header_mapping(process_name):
+    clear_vil_header_mapping_file(process_name)
+    mapping_store = session.get("vil_header_mapping")
+    if not mapping_store or process_name not in mapping_store:
+        return
+    mapping_store = dict(mapping_store)
+    mapping_store.pop(process_name, None)
+    if mapping_store:
+        session["vil_header_mapping"] = mapping_store
+    else:
+        session.pop("vil_header_mapping", None)
+    session.modified = True
+
+
+def get_vil_reconfirm_header_preview(process_name):
+    """Confirmed merged file in input/ still needs mapping saved on disk."""
+    if vil_header_mapping_is_confirmed(process_name):
+        return None, None
+    if get_vil_pending_merged_preview_path(process_name)[0]:
+        return None, None
+    _, input_dir, _ = get_valid_invalid_paths(process_name)
+    if not input_dir or not input_dir.exists():
+        return None, None
+    merged_files = [p for p in input_dir.iterdir() if p.is_file()]
+    if not merged_files:
+        return None, None
+    return merged_files[0], "reconfirm"
+
+
+def get_vil_reconfirm_header_info_for_ui(process_name):
+    path, _source = get_vil_reconfirm_header_preview(process_name)
     if not path:
         return None
     return inspect_valid_invalid_headers(path)
@@ -268,6 +429,7 @@ def clear_vil_stage_for_process(process_name):
 def clear_vil_merge_selection_for_process(process_name):
     clear_vil_pending_lcm_for_process(process_name)
     clear_vil_stage_for_process(process_name)
+    clear_vil_header_mapping(process_name)
 
 
 def clear_vil_confirmed_merged_files(process_name):
@@ -334,6 +496,7 @@ def list_directory_entries(relative_path):
         file_count = None
         process_type = None
         process_name = None
+        parent_folder = None
         output_file_count = 0
         if item.is_dir():
             direct_children = list(item.iterdir())
@@ -342,7 +505,9 @@ def list_directory_entries(relative_path):
             if item.name == "input":
                 try:
                     process_name = item.parent.name
-                    process_type = item.parent.parent.name
+                    subprocess_folder = item.parent.parent.name
+                    parent_folder = item.parent.parent.parent.name
+                    process_type = subprocess_folder
                     output_dir = item.parent / "output"
                     if output_dir.exists() and output_dir.is_dir():
                         output_file_count = sum(
@@ -351,6 +516,7 @@ def list_directory_entries(relative_path):
                 except Exception:
                     process_type = None
                     process_name = None
+                    parent_folder = None
                     output_file_count = 0
         entries.append(
             {
@@ -361,6 +527,7 @@ def list_directory_entries(relative_path):
                 "file_count": file_count,
                 "process_type": process_type,
                 "process_name": process_name,
+                "parent_folder": parent_folder if item.is_dir() and item.name == "input" else None,
                 "output_file_count": output_file_count,
             }
         )
@@ -382,8 +549,15 @@ def annotate_process_button_state(
         if entry.get("is_dir") and entry.get("name") == "input":
             process_type = entry.get("process_type") or ""
             process_name = entry.get("process_name") or ""
+            parent_folder = entry.get("parent_folder") or ""
 
-            if (
+            if parent_folder and parent_folder != MERGE_VALID_LOOKUP_PARENT_FOLDER:
+                process_disabled = True
+                process_disabled_message = (
+                    "Processing from the directory browser is only available for "
+                    f"'{MERGE_VALID_LOOKUP_GROUP_LABEL}' sub-processes."
+                )
+            elif (
                 life_cycle_running
                 and process_type == LIFE_CYCLE_PROCESS_FOLDER
                 and process_name == life_cycle_process_name
@@ -427,7 +601,11 @@ def file_process_download():
 
 
 def process_life_cycle_files(process_name):
-    process_dir, input_dir = get_process_input_dir(LIFE_CYCLE_PROCESS_FOLDER, process_name)
+    process_dir, input_dir = get_process_input_dir(
+        MERGE_VALID_LOOKUP_PARENT_FOLDER,
+        LIFE_CYCLE_SUBPROCESS_FOLDER,
+        process_name,
+    )
     if not process_dir or not input_dir:
         return False, "Please provide a valid process name."
 
@@ -438,6 +616,17 @@ def process_life_cycle_files(process_name):
     if not files_to_process:
         return False, "Please upload at least one file before final submit."
 
+    try:
+        header_keywords = get_lc_etc_header_keyword_strings()
+    except Exception as exc:
+        return False, f"Could not load LC/ETC header keywords from database: {exc}"
+
+    if len(header_keywords) < 3:
+        return (
+            False,
+            "Configure at least 3 header keywords for LC/ETC in Header Keywords before running the merge.",
+        )
+
     output_dir = process_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / "merged_output.csv"
@@ -446,7 +635,7 @@ def process_life_cycle_files(process_name):
         merge_files_in_folder(
             str(input_dir.resolve()),
             str(output_file.resolve()),
-            LIFE_CYCLE_MERGE_HEADER_KEYWORDS,
+            header_keywords,
         )
     except Exception as exc:
         return False, f"Life cycle merge failed: {exc}"
@@ -521,9 +710,30 @@ def valid_invalid_status():
     return jsonify(state)
 
 
+@app.context_processor
+def inject_process_labels():
+    return {
+        "merge_valid_lookup_group_label": MERGE_VALID_LOOKUP_GROUP_LABEL,
+        "merge_valid_lookup_parent_folder": MERGE_VALID_LOOKUP_PARENT_FOLDER,
+    }
+
+
 @app.route("/")
 def home():
     return render_template("home.html")
+
+
+@app.route("/merge-valid-lookup")
+def merge_valid_lookup_hub():
+    return render_template("merge_valid_lookup_hub.html")
+
+
+@app.route("/exempt-query")
+def exempt_query_hub():
+    return render_template(
+        "exempt_query_hub.html",
+        exempt_query_folder=EXEMPT_QUERY_PARENT_FOLDER,
+    )
 
 
 @app.route("/current-process")
@@ -681,7 +891,12 @@ def file_process_directories():
                     running_process_name = life_cycle_state["process_name"]
 
                 running_process_dir = (
-                    (FILE_PROCESS_DIR / running_process_type / running_process_name).resolve()
+                    (
+                        FILE_PROCESS_DIR
+                        / MERGE_VALID_LOOKUP_PARENT_FOLDER
+                        / running_process_type
+                        / running_process_name
+                    ).resolve()
                     if running and running_process_name
                     else None
                 )
@@ -725,9 +940,13 @@ def file_process_directories():
             else:
                 try:
                     process_name = target_path.parent.name
-                    process_type = target_path.parent.parent.name
+                    subprocess_folder = target_path.parent.parent.name
+                    parent_folder = target_path.parent.parent.parent.name
+                    process_type = subprocess_folder
                 except Exception:
                     process_name = ""
+                    subprocess_folder = ""
+                    parent_folder = ""
                     process_type = ""
 
                 process_dir = target_path.parent
@@ -769,6 +988,15 @@ def file_process_directories():
                     or "Failed to clear output folder" in messages[-1][1]
                 ):
                     pass
+                elif parent_folder == EXEMPT_QUERY_PARENT_FOLDER:
+                    messages.append(
+                        (
+                            "error",
+                            "Exempt Query processing is not yet available from the directory browser.",
+                        )
+                    )
+                elif parent_folder != MERGE_VALID_LOOKUP_PARENT_FOLDER:
+                    messages.append(("error", "Unsupported process group for this input folder."))
                 elif process_type == LIFE_CYCLE_PROCESS_FOLDER:
                     with life_cycle_state_lock:
                         running = life_cycle_state["running"]
@@ -857,6 +1085,56 @@ def file_process_directories():
     )
 
 
+@app.route("/api/lc-etc-header-keywords", methods=["GET"])
+def api_list_lc_etc_header_keywords():
+    try:
+        records = get_lc_etc_header_keyword_records()
+        return jsonify({"file_type": LC_ETC_FILE_TYPE, "keywords": records})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/lc-etc-header-keywords", methods=["POST"])
+def api_add_lc_etc_header_keyword():
+    payload = request.get_json(silent=True) or {}
+    keyword = (payload.get("header_keywords") or request.form.get("header_keywords") or "").strip()
+    if not keyword:
+        return jsonify({"error": "Header keyword is required."}), 400
+    try:
+        record = add_header_keyword(LC_ETC_FILE_TYPE, keyword)
+        return jsonify({"keyword": record})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/lc-etc-header-keywords/<int:keyword_id>", methods=["PUT"])
+def api_update_lc_etc_header_keyword(keyword_id):
+    payload = request.get_json(silent=True) or {}
+    keyword = (payload.get("header_keywords") or "").strip()
+    if not keyword:
+        return jsonify({"error": "Header keyword is required."}), 400
+    try:
+        record = update_header_keyword(keyword_id, keyword, file_type=LC_ETC_FILE_TYPE)
+        return jsonify({"keyword": record})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/lc-etc-header-keywords/<int:keyword_id>", methods=["DELETE"])
+def api_delete_lc_etc_header_keyword(keyword_id):
+    try:
+        delete_header_keyword(keyword_id, file_type=LC_ETC_FILE_TYPE)
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/life-cycle-merge", methods=["GET", "POST"])
 def life_cycle_merge():
     messages = []
@@ -865,7 +1143,11 @@ def life_cycle_merge():
 
     if request.method == "POST":
         action = request.form.get("action")
-        process_dir, input_dir = get_process_input_dir(LIFE_CYCLE_PROCESS_FOLDER, current_process_name)
+        process_dir, input_dir = get_process_input_dir(
+            MERGE_VALID_LOOKUP_PARENT_FOLDER,
+            LIFE_CYCLE_SUBPROCESS_FOLDER,
+            current_process_name,
+        )
 
         if action == "upload":
             if not process_dir or not input_dir:
@@ -877,7 +1159,12 @@ def life_cycle_merge():
                     messages.append(("error", "Please select at least one file to upload."))
                 else:
                     existing_files = {
-                        name.lower() for name in list_uploaded_files(LIFE_CYCLE_PROCESS_FOLDER, current_process_name)
+                        name.lower()
+                        for name in list_uploaded_files(
+                            MERGE_VALID_LOOKUP_PARENT_FOLDER,
+                            LIFE_CYCLE_SUBPROCESS_FOLDER,
+                            current_process_name,
+                        )
                     }
                     uploaded_count = 0
                     skipped_duplicates = []
@@ -949,39 +1236,65 @@ def life_cycle_merge():
             if not current_process_name:
                 messages.append(("error", "Process name is required before final submit."))
             else:
-                with life_cycle_state_lock:
-                    running = life_cycle_state["running"]
-                if running:
+                process_dir, input_dir = get_process_input_dir(
+                    MERGE_VALID_LOOKUP_PARENT_FOLDER,
+                    LIFE_CYCLE_SUBPROCESS_FOLDER,
+                    current_process_name,
+                )
+                uploaded_count = 0
+                if input_dir and input_dir.exists():
+                    uploaded_count = sum(1 for p in input_dir.iterdir() if p.is_file())
+                if uploaded_count < MIN_LIFE_CYCLE_MERGE_FILES:
                     messages.append(
                         (
                             "error",
-                            "A life cycle merge is already running. Please wait for it to finish.",
+                            f"Upload at least {MIN_LIFE_CYCLE_MERGE_FILES} files before starting the merge.",
                         )
                     )
                 else:
-                    worker = threading.Thread(
-                        target=run_life_cycle_merge_in_background,
-                        args=(current_process_name,),
-                        daemon=True,
-                    )
-                    worker.start()
-                    messages.append(
-                        (
-                            "success",
-                            f"Merge started in background for '{current_process_name}'. "
-                            "You can navigate to other pages.",
+                    with life_cycle_state_lock:
+                        running = life_cycle_state["running"]
+                    if running:
+                        messages.append(
+                            (
+                                "error",
+                                "A life cycle merge is already running. Please wait for it to finish.",
+                            )
                         )
-                    )
-                    reset_form_after_submit = True
-                    current_process_name = ""
+                    else:
+                        worker = threading.Thread(
+                            target=run_life_cycle_merge_in_background,
+                            args=(current_process_name,),
+                            daemon=True,
+                        )
+                        worker.start()
+                        messages.append(
+                            (
+                                "success",
+                                f"Merge started in background for '{current_process_name}'. "
+                                "You can navigate to other pages.",
+                            )
+                        )
+                        reset_form_after_submit = True
+                        current_process_name = ""
 
     with life_cycle_state_lock:
         current_life_cycle_state = dict(life_cycle_state)
 
+    try:
+        lc_etc_header_keywords = get_lc_etc_header_keyword_records()
+    except Exception as exc:
+        lc_etc_header_keywords = []
+        messages.append(("error", f"Could not load LC/ETC header keywords from database: {exc}"))
+
     return render_template(
         "life_cycle_merge.html",
         current_process_name=current_process_name,
-        uploaded_files=list_uploaded_files(LIFE_CYCLE_PROCESS_FOLDER, current_process_name)
+        uploaded_files=list_uploaded_files(
+            MERGE_VALID_LOOKUP_PARENT_FOLDER,
+            LIFE_CYCLE_SUBPROCESS_FOLDER,
+            current_process_name,
+        )
         if current_process_name
         else [],
         file_process_directories=list_file_process_directories(),
@@ -989,6 +1302,9 @@ def life_cycle_merge():
         allowed_extensions=sorted(ALLOWED_EXTENSIONS),
         life_cycle_state=current_life_cycle_state,
         reset_form_after_submit=reset_form_after_submit,
+        min_life_cycle_merge_files=MIN_LIFE_CYCLE_MERGE_FILES,
+        lc_etc_header_keywords=lc_etc_header_keywords,
+        lc_etc_file_type=LC_ETC_FILE_TYPE,
     )
 
 
@@ -1088,7 +1404,9 @@ def valid_invalid_lookup():
                     messages.append(("error", "Invalid process name."))
                 else:
                     try:
-                        header_info = get_valid_invalid_header_info_for_ui(current_process_name)
+                        header_info = get_vil_pending_header_info_for_ui(current_process_name)
+                        if header_info is None:
+                            header_info = get_vil_reconfirm_header_info_for_ui(current_process_name)
                     except Exception as exc:
                         header_info = None
                         messages.append(("error", f"Could not inspect merged file headers: {exc}"))
@@ -1127,32 +1445,41 @@ def valid_invalid_lookup():
                                 )
                             )
                         else:
-                            try:
-                                ok, merged_name = finalize_vil_staged_merged_file(current_process_name)
-                            except PermissionError:
-                                ok, merged_name = False, "Could not finalize merged file because it is in use."
-                            except OSError as exc:
-                                ok, merged_name = False, f"Could not finalize merged file: {exc}"
+                            pending_path, _pending_source = get_vil_pending_merged_preview_path(current_process_name)
+                            if pending_path:
+                                try:
+                                    ok, merged_name = finalize_vil_staged_merged_file(current_process_name)
+                                except PermissionError:
+                                    ok, merged_name = False, "Could not finalize merged file because it is in use."
+                                except OSError as exc:
+                                    ok, merged_name = False, f"Could not finalize merged file: {exc}"
+                            else:
+                                confirmed_files = (
+                                    [p for p in input_dir.iterdir() if p.is_file()]
+                                    if input_dir and input_dir.exists()
+                                    else []
+                                )
+                                if confirmed_files:
+                                    ok, merged_name = True, confirmed_files[0].name
+                                else:
+                                    ok, merged_name = False, "No merged file is ready for mapping confirmation."
 
                             if ok:
+                                save_vil_header_mapping(current_process_name, selected_header_mapping)
+                                header_info = None
                                 messages.append(
                                     (
                                         "success",
                                         f"Header mapping confirmed. Merged file '{merged_name}' is now attached to this process.",
                                     )
                                 )
-                                try:
-                                    header_info = get_valid_invalid_header_info_for_ui(current_process_name)
-                                except Exception as exc:
-                                    header_info = None
-                                    messages.append(("error", f"Could not refresh merged file headers: {exc}"))
                             else:
                                 messages.append(("error", merged_name))
                     else:
                         messages.append(
                             (
                                 "error",
-                                "No staged merged file is ready. Upload a merged file or choose a merge output first.",
+                                "No merged file is ready for header mapping. Upload a merged file or choose a merge output first.",
                             )
                         )
 
@@ -1204,47 +1531,17 @@ def valid_invalid_lookup():
                             )
                         )
                     else:
-                        try:
-                            header_info = inspect_valid_invalid_headers(confirmed_merged_files[0])
-                        except Exception as exc:
+                        stored_mapping = load_vil_header_mapping_from_disk(current_process_name)
+                        if not is_vil_header_mapping_complete(stored_mapping):
                             header_info = None
-                            messages.append(("error", f"Could not inspect merged file headers: {exc}"))
-
-                    if header_info:
-                        for canonical in VALID_INVALID_LOOKUP_REQUIRED_COLUMNS:
-                            selected_value = request.form.get(f"header_mapping__{canonical}", "").strip()
-                            if selected_value:
-                                selected_header_mapping[canonical] = selected_value
-                            elif canonical in header_info["detected_mapping"]:
-                                selected_header_mapping[canonical] = header_info["detected_mapping"][canonical]
-
-                        missing_user_mappings = [
-                            canonical
-                            for canonical in VALID_INVALID_LOOKUP_REQUIRED_COLUMNS
-                            if canonical not in selected_header_mapping
-                        ]
-                        invalid_user_mappings = [
-                            canonical
-                            for canonical, selected_value in selected_header_mapping.items()
-                            if selected_value not in header_info["available_columns"]
-                        ]
-
-                        if missing_user_mappings:
                             messages.append(
                                 (
                                     "error",
-                                    "Please select columns for: " + ", ".join(missing_user_mappings),
+                                    "Header mapping must be confirmed before Submit. Review the mapping section above and click Confirm.",
                                 )
                             )
-                        elif invalid_user_mappings:
-                            messages.append(
-                                (
-                                    "error",
-                                    "Selected column mapping is invalid for: " + ", ".join(invalid_user_mappings),
-                                )
-                            )
-                    else:
-                        pass
+                        else:
+                            selected_header_mapping = stored_mapping
 
                     rate_files = [p for p in rate_dir.iterdir() if p.is_file()] if rate_dir.exists() else []
                     if not rate_files:
@@ -1283,21 +1580,33 @@ def valid_invalid_lookup():
 
     if current_process_name and header_info is None:
         try:
-            header_info = get_valid_invalid_header_info_for_ui(current_process_name)
+            header_info = get_vil_pending_header_info_for_ui(current_process_name)
+            if header_info is None:
+                header_info = get_vil_reconfirm_header_info_for_ui(current_process_name)
         except Exception as exc:
             messages.append(("error", f"Could not inspect merged file headers: {exc}"))
 
     pending_lcm_rel = ""
+    merged_preview_source = ""
     if current_process_name:
         pending_lcm_rel = (_vil_pending_lcm_read().get(current_process_name) or "").strip()
+        _, pending_source = get_vil_pending_merged_preview_path(current_process_name)
+        if pending_source:
+            merged_preview_source = pending_source
+        else:
+            _, merged_preview_source = get_vil_reconfirm_header_preview(current_process_name)
 
     if header_info and not selected_header_mapping:
-        for canonical in VALID_INVALID_LOOKUP_REQUIRED_COLUMNS:
-            if canonical in header_info["detected_mapping"]:
-                selected_header_mapping[canonical] = header_info["detected_mapping"][canonical]
+        stored_mapping = load_vil_header_mapping_from_disk(current_process_name)
+        if is_vil_header_mapping_complete(stored_mapping):
+            selected_header_mapping = stored_mapping
+        else:
+            for canonical in VALID_INVALID_LOOKUP_REQUIRED_COLUMNS:
+                if canonical in header_info["detected_mapping"]:
+                    selected_header_mapping[canonical] = header_info["detected_mapping"][canonical]
 
-    _, merged_preview_source = (
-        get_vil_merged_preview_path(current_process_name) if current_process_name else (None, None)
+    header_mapping_confirmed = (
+        vil_header_mapping_is_confirmed(current_process_name) if current_process_name else False
     )
 
     return render_template(
@@ -1313,6 +1622,7 @@ def valid_invalid_lookup():
         lcm_output_files=list_life_cycle_merge_output_files(),
         pending_lcm_import_rel=pending_lcm_rel,
         merged_preview_source=merged_preview_source or "",
+        header_mapping_confirmed=header_mapping_confirmed,
     )
 
 

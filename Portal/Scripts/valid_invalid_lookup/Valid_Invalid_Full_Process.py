@@ -40,7 +40,7 @@ TABLE_NAME = os.environ.get("RDS_TABLE_NAME", "checkpostmaster")
 # -----------------------------
 # Load Rates File
 # -----------------------------
-RATES_INPUT_PATH = os.environ.get("VALID_INVALID_RATES_PATH", r"Veravalli Rates.xlsx")
+RATES_INPUT_PATH = os.environ.get("VALID_INVALID_RATES_PATH")
 LIFECYCLE_INPUT_PATH = os.environ.get("VALID_INVALID_LIFECYCLE_PATH", r"merged_output.csv")
 USER_HEADER_MAPPING = json.loads(os.environ.get("VALID_INVALID_HEADER_MAPPING", "{}"))
 

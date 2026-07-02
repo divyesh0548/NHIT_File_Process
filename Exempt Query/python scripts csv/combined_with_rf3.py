@@ -1,11 +1,9 @@
 import pandas as pd
 import numpy as np
-from config import get_file_path, get_base_output_path, get_local_code
+from config import get_file_path, get_local_code, output_path
 from data_processing import load_and_preprocess_data
 # from main_script import main
 # from RF3_condition import main as rf3_main
-
-base_output_path = get_base_output_path()
 
 # Load the necessary Excel files into DataFrames
 # final_result = main()
@@ -19,9 +17,9 @@ base_output_path = get_base_output_path()
 
 # rf_3_2 = rf3_2
 # rf_3_2['TRI 2 & 3'] = rf_3_2['TRI 2'].astype(str)
-combine_rf = pd.read_excel(base_output_path + "/updated_new_Combined_Side_Results.xlsx")
-rf_3_1 = pd.read_excel(base_output_path + "/rf3_1.xlsx", dtype={'TRI 2 & 3': str})
-rf_3_2 = pd.read_excel(base_output_path + "/rf3_2.xlsx", dtype={'TRI 2': str})
+combine_rf = pd.read_excel(output_path("updated_new_Combined_Side_Results.xlsx"))
+rf_3_1 = pd.read_excel(output_path("rf3_1.xlsx"), dtype={'TRI 2 & 3': str})
+rf_3_2 = pd.read_excel(output_path("rf3_2.xlsx"), dtype={'TRI 2': str})
 
 #combine_rf["Txn ID"] = combine_rf["Txn ID"].astype(str)
 
@@ -91,9 +89,6 @@ df_merged['Exempt txn'] = df_merged['Trip Rules'] - df_merged['TRI 3'].fillna(0)
 # Add the "Trip Group" column based on the "Exempt txn" logic
 df_merged['Trip Group'] = df_merged['Exempt txn'].apply(lambda x: "0-5" if 0 <= x <= 5 else ">5")
 
-# Get base output path and save the final merged DataFrame to an Excel file
-base_output_path = get_base_output_path()
-output_path = f"{base_output_path}/combined_with_rf3.xlsx"
-#df_merged.to_excel(output_path, index=False)
-df_merged.to_excel(output_path, index=False, sheet_name="Combined with RF 3", engine="openpyxl")
-print(f"Data saved to {output_path}")
+out_file = output_path("combined_with_rf3.xlsx")
+df_merged.to_excel(out_file, index=False, sheet_name="Combined with RF 3", engine="openpyxl")
+print(f"Data saved to {out_file}")

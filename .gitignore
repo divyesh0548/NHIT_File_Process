@@ -70,16 +70,16 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# --- Merge / convert temp dirs (merge_files.py, Life_cycle_merge*.py) ---
-life_cycle_merge_*/
+# # --- Merge / convert temp dirs (merge_files.py, Life_cycle_merge*.py) ---
+# life_cycle_merge_*/
 
-# --- Portal runtime data (uploads, merged outputs, lookup results) ---
-Portal/File_Process/
+# # --- Portal runtime data (uploads, merged outputs, lookup results) ---
+# Portal/File_Process/
 
-# --- Local input/output folders (scripts read/write here; not versioned) ---
-Exempt Query/Daroda_lc_vrn_files/
-Exempt Query/pass_files/
-Exempt Query/pass_output/
-Exempt Query/lcy/
-valid invalid script/pullur valid invalid output/
-Life Cycle Report/
+# # --- Local input/output folders (scripts read/write here; not versioned) ---
+# Exempt Query/Daroda_lc_vrn_files/
+# Exempt Query/pass_files/
+# Exempt Query/pass_output/
+# Exempt Query/lcy/
+# valid invalid script/pullur valid invalid output/
+# Life Cycle Report/

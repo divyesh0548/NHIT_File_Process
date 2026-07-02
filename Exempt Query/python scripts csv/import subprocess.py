@@ -1,9 +1,17 @@
 import subprocess
 import time
 
-def run_script(script_name):
-    print(f"\nRunning {script_name}...")
-    start_time = time.time()        
+def run_script(script_name, step=None, total=None):
+    if step is not None and total is not None:
+        print(
+            f"\n[DEBUG] Step {step}/{total}: {script_name} program is going to be executed.",
+            flush=True,
+        )
+    else:
+        print(f"\n[DEBUG] {script_name} program is going to be executed.", flush=True)
+
+    print(f"Running {script_name}...", flush=True)
+    start_time = time.time()
 
     result = subprocess.run(["python", script_name], capture_output=True, text=True)
 
@@ -33,8 +41,8 @@ def main():
     total_start = time.time()
     total_time = 0
 
-    for script in scripts:
-        script_time = run_script(script)
+    for index, script in enumerate(scripts, start=1):
+        script_time = run_script(script, step=index, total=len(scripts))
         total_time += script_time
 
     total_end = time.time()

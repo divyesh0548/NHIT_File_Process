@@ -112,8 +112,8 @@ NORMALIZATION_GROUPS = {
     "Description": [
         "DESC",
         "DESCRIPTION",
-        # "Remarks",
-        # "Remark"
+        "Remarks",
+        "Remark"
     ],
     "File Name": [
         "FILENAME",

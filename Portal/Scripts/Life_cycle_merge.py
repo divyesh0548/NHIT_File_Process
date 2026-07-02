@@ -247,7 +247,15 @@ def merge_files_in_folder(folder_path, output_file, header_keywords):
 
 
 if __name__ == "__main__":
+    import sys
+
+    portal_root = Path(__file__).resolve().parent.parent
+    if str(portal_root) not in sys.path:
+        sys.path.insert(0, str(portal_root))
+
+    from db.nhit_file_process import get_lc_etc_header_keyword_strings
+
     folder_path = "Life Cycle Report"
     output_file = "merged_output_life_cycle_report_with_all_columns.csv"
-    header_keywords = ["Agency Txn Id", "Settlement Amount", "Plaza ID", "Violation Amts"]
+    header_keywords = get_lc_etc_header_keyword_strings()
     merge_files_in_folder(folder_path, output_file, header_keywords)

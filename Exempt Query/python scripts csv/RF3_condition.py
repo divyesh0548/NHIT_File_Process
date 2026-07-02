@@ -1,5 +1,5 @@
 import pandas as pd
-from config import get_file_path, get_base_output_path
+from config import get_file_path, output_path
 from data_processing import load_and_preprocess_data
 
 def main():
@@ -96,18 +96,13 @@ def main():
     # =========================
     # SAVE FILES
     # =========================
-    base_output_path = get_base_output_path()
-
-    rf3_pivot_file_path = f"{base_output_path}/RF3 Pivot.xlsx"
-    result_df.to_excel(rf3_pivot_file_path, index=False)
+    result_df.to_excel(output_path("RF3 Pivot.xlsx"), index=False)
 
     rf3_1 = df_merged[df_merged['TRI 2 & 3'] == '00'][['Veh Reg No.', 'TRI 2 & 3']].drop_duplicates()
-    rf3_1_file_path = f"{base_output_path}/rf3_1.xlsx"
-    rf3_1.to_excel(rf3_1_file_path, index=False)
+    rf3_1.to_excel(output_path("rf3_1.xlsx"), index=False)
 
     rf3_2 = df_merged[['Veh Reg No.', 'TRI 1', 'TRI 2', 'TRI 3']].drop_duplicates()
-    rf3_2_file_path = f"{base_output_path}/rf3_2.xlsx"
-    rf3_2.to_excel(rf3_2_file_path, index=False)
+    rf3_2.to_excel(output_path("rf3_2.xlsx"), index=False)
 
     print("RF3 files generated successfully.")
 

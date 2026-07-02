@@ -1,17 +1,9 @@
 """
 Central place for header detection keywords and column/header mappings used by Portal jobs.
 
-Add new lists or dicts here as workflows grow; import them from `app` or scripts as needed.
+LC/ETC merge header keywords are stored in the `nhit_file_process` database table.
+See `db.nhit_file_process` for load/save helpers.
 """
-
-# Life cycle merge (`Scripts/Life_cycle_merge.merge_files_in_folder`): keywords used to locate
-# the header row (at least 3 must match in the script logic).
-LIFE_CYCLE_MERGE_HEADER_KEYWORDS = [
-    "Agency Txn Id",
-    "Settlement Amount",
-    "Plaza ID",
-    "Violation Amts",
-]
 
 VALID_INVALID_LOOKUP_HEADER_MAPPING = {
     "Journey Type": [
