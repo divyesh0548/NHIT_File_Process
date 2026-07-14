@@ -1,0 +1,1 @@
+Keyword lists are identified. Now give prompt to store them in a config file so that they can be managed easily.

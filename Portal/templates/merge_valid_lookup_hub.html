@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}{{ merge_valid_lookup_group_label }}{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Process Group</p>
+        <h1>{{ merge_valid_lookup_group_label }}</h1>
+        <p>Select a sub-process below.</p>
+    </div>
+    <div class="actions" style="margin-top: 0;">
+        <a class="btn secondary" href="{{ url_for('home') }}">Back to Home</a>
+    </div>
+</section>
+
+<section class="grid cols-2">
+    <article class="card">
+        <h3 class="card-title">Life Cycle Merge</h3>
+        <p>Upload monthly source files, keep process folders organized, and trigger the merge submit flow.</p>
+        <div class="actions">
+            <a class="btn" href="{{ url_for('life_cycle_merge') }}">Open</a>
+        </div>
+    </article>
+    <article class="card">
+        <h3 class="card-title">Valid/Invalid Lookup</h3>
+        <p>Upload merged life cycle and rates files, map headers, and run the valid/invalid lookup process.</p>
+        <div class="actions">
+            <a class="btn" href="{{ url_for('valid_invalid_lookup') }}">Open</a>
+        </div>
+    </article>
+</section>
+{% endblock %}

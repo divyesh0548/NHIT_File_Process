@@ -1,0 +1,3 @@
+Life_cycle_merge.py --> Merges all files uploaded in a folder regardless of its extension. Keeps adding new columns if found in next files.
+
+

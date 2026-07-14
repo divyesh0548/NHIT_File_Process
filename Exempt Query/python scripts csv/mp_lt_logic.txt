@@ -1,0 +1,4 @@
+If MP and LT are available then LT output in return_journey_logic.py. and include Date_validity_check_LT.py as sub-process.
+
+
+MP,LT pass files are available for more than one month.

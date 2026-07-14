@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}File_Process Directories{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Directory Browser</p>
+        <h1>File_Process Directories</h1>
+        <p>Review folders and files created by the portal, move deeper into the tree, and remove old items when required.</p>
+    </div>
+</section>
+
+<article class="card" style="margin-bottom: 22px;">
+    <p class="eyebrow">Current Location</p>
+    <h2>Directory path</h2>
+    <span class="path-chip">/File_Process{% if current_relative %}/{{ current_relative }}{% endif %}</span>
+</article>
+
+{% if messages %}
+    <div class="message-list">
+        {% for message_type, message in messages %}
+            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<article class="list-card">
+    <div class="section-head">
+        <div class="section-title-row">
+            {% if current_relative %}
+                <a class="icon-btn" href="{{ url_for('file_process_directories', path=parent_relative) }}" aria-label="Go up one level">&#8592;</a>
+            {% endif %}
+            <div>
+            <h2>Directory Contents</h2>
+            <p>Folders open in place. Files can be downloaded or deleted when required.</p>
+            </div>
+        </div>
+    </div>
+    {% if entries %}
+        <ul class="data-list">
+            {% for entry in entries %}
+                <li class="data-row">
+                    <span class="data-name">
+                        {% if entry.is_dir %}
+                            <a class="directory-link" href="{{ url_for('file_process_directories', path=entry.relative_path) }}">{{ entry.name }}/</a>
+                            <span class="muted">({{ entry.folder_count }} folder(s), {{ entry.file_count }} file(s))</span>
+                        {% else %}
+                            {{ entry.name }}
+                        {% endif %}
+                    </span>
+                    <div class="actions" style="margin: 0;">
+                        {% if entry.is_dir and entry.name == 'input' %}
+                            {% if entry.process_disabled %}
+                                <button
+                                    class="btn js-process-disabled"
+                                    type="button"
+                                    data-toast-message="{{ entry.process_disabled_message }}"
+                                >
+                                    Process
+                                </button>
+                            {% else %}
+                                <form
+                                    method="post"
+                                    style="margin: 0;"
+                                    class="js-process-form"
+                                    data-output-file-count="{{ entry.output_file_count or 0 }}"
+                                    data-process-name="{{ entry.process_name or '' }}"
+                                >
+                                    <input type="hidden" name="action" value="run_process">
+                                    <input type="hidden" name="path" value="{{ current_relative }}">
+                                    <input type="hidden" name="target_path" value="{{ entry.relative_path }}">
+                                    <input type="hidden" name="overwrite_output" value="no">
+                                    <button class="btn" type="submit">Process</button>
+                                </form>
+                            {% endif %}
+                        {% endif %}
+                        {% if not entry.is_dir %}
+                            <a class="btn secondary" href="{{ url_for('file_process_download', path=entry.relative_path) }}">Download</a>
+                        {% endif %}
+                        {% if delete_disabled %}
+                            <button
+                                class="btn danger js-delete-disabled"
+                                type="button"
+                                data-toast-message="{{ delete_disabled_message }}"
+                            >
+                                Delete
+                            </button>
+                        {% else %}
+                            <form method="post" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this item?');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="path" value="{{ current_relative }}">
+                                <input type="hidden" name="target_path" value="{{ entry.relative_path }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        {% endif %}
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <div class="empty-state">
+            <p>No files or folders found in this location.</p>
+        </div>
+    {% endif %}
+</article>
+{% endblock %}
+
+{% block toast_markup %}
+<div class="toast-container position-fixed bottom-0 start-0 p-3">
+    <div id="deleteDisabledToast" class="toast text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body" id="deleteDisabledToastBody">
+                Delete is currently disabled.
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (function () {
+        const toastElement = document.getElementById("deleteDisabledToast");
+        const toastBody = document.getElementById("deleteDisabledToastBody");
+        if (!toastElement || !toastBody || typeof bootstrap === "undefined") {
+            return;
+        }
+
+        const deleteDisabledToast = new bootstrap.Toast(toastElement, {
+            autohide: true,
+            delay: 3500
+        });
+
+        document.querySelectorAll(".js-delete-disabled").forEach((button) => {
+            button.addEventListener("click", () => {
+                toastBody.textContent = button.dataset.toastMessage || "Delete is currently disabled.";
+                deleteDisabledToast.show();
+            });
+        });
+
+        document.querySelectorAll(".js-process-disabled").forEach((button) => {
+            button.addEventListener("click", () => {
+                toastBody.textContent = button.dataset.toastMessage || "Process is currently disabled.";
+                deleteDisabledToast.show();
+            });
+        });
+
+        document.querySelectorAll(".js-process-form").forEach((form) => {
+            form.addEventListener("submit", (event) => {
+                const outputFileCount = Number(form.dataset.outputFileCount || "0");
+                const overwriteField = form.querySelector('input[name="overwrite_output"]');
+                const processName = form.dataset.processName || "this process";
+
+                if (outputFileCount > 0) {
+                    const confirmed = window.confirm(
+                        `The output folder for "${processName}" already contains ${outputFileCount} item(s). `
+                        + "These files will be deleted before processing starts. Do you want to continue?"
+                    );
+
+                    if (!confirmed) {
+                        event.preventDefault();
+                        return;
+                    }
+
+                    if (overwriteField) {
+                        overwriteField.value = "yes";
+                    }
+                } else if (overwriteField) {
+                    overwriteField.value = "no";
+                }
+            });
+        });
+    })();
+</script>
+{% endblock %}

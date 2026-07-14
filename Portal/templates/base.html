@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NHIT In House File Processing{% endblock %}</title>
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+        crossorigin="anonymous"
+    >
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg-top: #0d1117;
+            --bg-bottom: #151b24;
+            --panel: #121820;
+            --surface: #1a222d;
+            --surface-raised: #222c3a;
+            --border: rgba(255, 255, 255, 0.1);
+            --text: #e8edf2;
+            --muted: #9aa8b8;
+            --primary: #2ea86a;
+            --primary-dark: #248a57;
+            --accent: #d4a05a;
+            --accent-muted: #8fb4a8;
+            --success-bg: rgba(46, 168, 106, 0.16);
+            --success-text: #8fe0b0;
+            --error-bg: rgba(220, 90, 74, 0.16);
+            --error-text: #f0a99f;
+            --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+            --link: #7ed4a8;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Trebuchet MS", Verdana, sans-serif;
+            color: var(--text);
+            background: linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+        }
+        .shell {
+            background: transparent;
+            min-height: 100vh;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 28px;
+            background: linear-gradient(135deg, #0f3d2a, #145c3d);
+            color: #ffffff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .brand {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .eyebrow {
+            margin: 0;
+            font-size: 12px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--accent-muted);
+            font-weight: 700;
+        }
+        .topbar .eyebrow {
+            color: rgba(255, 255, 255, 0.76);
+        }
+        .brand-title {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        .nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .nav a {
+            text-decoration: none;
+            color: rgba(255, 255, 255, 0.88);
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+        .nav a:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.14);
+        }
+        .nav a.active {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .content {
+            padding: 24px 28px 32px;
+            width: 100%;
+        }
+        h1, h2, h3 {
+            margin-top: 0;
+            color: #f4f7fa;
+        }
+        h1 {
+            margin-bottom: 12px;
+            font-size: clamp(2rem, 4vw, 3.25rem);
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+        }
+        h2 {
+            font-size: 1.25rem;
+            margin-bottom: 14px;
+        }
+        h3 {
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+        p {
+            margin-top: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+        code {
+            background: rgba(255, 255, 255, 0.08);
+            color: #c9d7e6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        strong {
+            color: #f4f7fa;
+        }
+        input[type="radio"],
+        input[type="checkbox"] {
+            accent-color: var(--primary);
+        }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 9px 14px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            color: #ffffff;
+            background: var(--primary);
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+            font-size: 0.94rem;
+            line-height: 1.2;
+        }
+        .btn:hover {
+            background: var(--primary-dark);
+            color: #ffffff;
+        }
+        .btn.secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            box-shadow: none;
+            border: 1px solid var(--border);
+        }
+        .btn.secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+        .btn.danger {
+            background: #c45a4d;
+            box-shadow: 0 10px 18px rgba(0, 0, 0, 0.28);
+        }
+        .btn.danger:hover {
+            background: #a84a3f;
+            color: #ffffff;
+        }
+        .btn:disabled,
+        .btn[disabled] {
+            opacity: 0.55;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .hero {
+            display: grid;
+            grid-template-columns: 1.35fr 0.95fr;
+            gap: 24px;
+            align-items: stretch;
+            margin-bottom: 28px;
+        }
+        .hero-panel,
+        .card,
+        .list-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .page-header h1 {
+            margin-bottom: 8px;
+            font-size: clamp(1.7rem, 3vw, 2.4rem);
+            line-height: 1.08;
+        }
+        .page-header p {
+            margin-bottom: 0;
+            max-width: 60ch;
+        }
+        .hero-panel.featured {
+            background: var(--surface-raised);
+            color: var(--text);
+        }
+        .hero-panel.featured h1,
+        .hero-panel.featured p,
+        .hero-panel.featured .eyebrow {
+            color: inherit;
+        }
+        .hero-panel.featured .eyebrow {
+            opacity: 1;
+            color: var(--accent-muted);
+        }
+        .hero-panel.featured p {
+            max-width: 48ch;
+        }
+        .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .grid {
+            display: grid;
+            gap: 20px;
+        }
+        .grid.cols-2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .grid.cols-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .workflow-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 7fr) minmax(280px, 3fr);
+            gap: 20px;
+            align-items: start;
+        }
+        .workflow-main,
+        .workflow-sidebar {
+            min-width: 0;
+        }
+        .card-title {
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+            color: #f4f7fa;
+        }
+        .field,
+        .file-input {
+            width: 100%;
+            padding: 11px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: #151b24;
+            color: var(--text);
+            font: inherit;
+        }
+        .field option {
+            background: #151b24;
+            color: var(--text);
+        }
+        .field:focus,
+        .file-input:focus {
+            outline: none;
+            border-color: rgba(46, 168, 106, 0.55);
+            box-shadow: 0 0 0 4px rgba(46, 168, 106, 0.16);
+        }
+        .file-input::file-selector-button {
+            margin-right: 12px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+            font: inherit;
+            cursor: pointer;
+        }
+        .file-input::file-selector-button:hover {
+            background: rgba(255, 255, 255, 0.12);
+        }
+        .stack {
+            display: grid;
+            gap: 14px;
+        }
+        .muted {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+        .message-list {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .message {
+            padding: 14px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            text-align: left;
+            border: 1px solid transparent;
+        }
+        .message.success {
+            background: var(--success-bg);
+            color: var(--success-text);
+            border-color: rgba(46, 168, 106, 0.28);
+        }
+        .message.error {
+            background: var(--error-bg);
+            color: var(--error-text);
+            border-color: rgba(220, 90, 74, 0.28);
+        }
+        .data-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: grid;
+            gap: 12px;
+        }
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 14px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+        .data-name {
+            font-weight: 600;
+            overflow-wrap: anywhere;
+            color: var(--text);
+        }
+        .directory-link,
+        .subtle-link {
+            color: var(--link);
+            text-decoration: none;
+            font-weight: 700;
+        }
+        .directory-link:hover,
+        .subtle-link:hover {
+            text-decoration: underline;
+            color: #a8e8c8;
+        }
+        .section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .section-title-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            text-decoration: none;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .icon-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+        .path-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(212, 160, 90, 0.14);
+            color: #e8c48a;
+            font-weight: 600;
+            font-size: 0.92rem;
+            border: 1px solid rgba(212, 160, 90, 0.22);
+        }
+        .empty-state {
+            padding: 18px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px dashed rgba(255, 255, 255, 0.14);
+            text-align: left;
+        }
+        .empty-state p {
+            color: var(--muted);
+        }
+        .stats {
+            display: grid;
+            gap: 14px;
+        }
+        .stat {
+            padding: 16px 18px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+        }
+        .stat strong {
+            display: block;
+            font-size: 1.7rem;
+            color: #f4f7fa;
+            margin-bottom: 6px;
+        }
+        @media (max-width: 860px) {
+            .hero,
+            .grid.cols-2,
+            .grid.cols-3,
+            .workflow-layout {
+                grid-template-columns: 1fr;
+            }
+            .topbar,
+            .page-header,
+            .section-head,
+            .data-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .section-title-row {
+                width: 100%;
+            }
+            .content {
+                padding: 20px 18px 22px;
+            }
+            .topbar {
+                padding: 18px;
+            }
+        }
+        @media (max-width: 540px) {
+            .hero-panel,
+            .card,
+            .list-card {
+                padding: 16px;
+            }
+            .content,
+            .topbar {
+                padding-left: 16px;
+                padding-right: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <header class="topbar">
+            <div class="brand">
+                <p class="eyebrow">NHIT</p>
+                <p class="brand-title">In-House File Processing Portal</p>
+            </div>
+            <nav class="nav">
+                <a class="{{ 'active' if request.endpoint == 'home' else '' }}" href="{{ url_for('home') }}">Home</a>
+                <a class="{{ 'active' if request.endpoint in ('merge_valid_lookup_hub', 'life_cycle_merge', 'valid_invalid_lookup') else '' }}" href="{{ url_for('merge_valid_lookup_hub') }}">{{ merge_valid_lookup_group_label }}</a>
+                <a class="{{ 'active' if request.endpoint == 'exempt_query_hub' else '' }}" href="{{ url_for('exempt_query_hub') }}">Exempt Query</a>
+                <a class="{{ 'active' if request.endpoint == 'file_process_directories' else '' }}" href="{{ url_for('file_process_directories') }}">Directories</a>
+                <a class="{{ 'active' if request.endpoint == 'current_process' else '' }}" href="{{ url_for('current_process') }}">Process Management</a>
+            </nav>
+        </header>
+        <main class="content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    {% block toast_markup %}{% endblock %}
+    <script
+        src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"
+    ></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

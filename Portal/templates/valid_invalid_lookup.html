@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block title %}Valid/Invalid Lookup{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Process Intake</p>
+        <h1>Valid/Invalid Lookup</h1>
+        <p>Upload source files and submit this process.</p>
+    </div>
+    <div class="actions" style="margin-top: 0;">
+        <a class="btn secondary" href="{{ url_for('merge_valid_lookup_hub') }}">Back to {{ merge_valid_lookup_group_label }}</a>
+    </div>
+</section>
+
+{% if messages %}
+    <div class="message-list">
+        {% for message_type, message in messages %}
+            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+{% if header_info %}
+    <article class="card" style="margin-bottom: 22px;">
+        <div class="section-head">
+            <div>
+                <h2>Header Mapping</h2>
+                <p class="muted">
+                    Source: {{ header_info.source_name }}.
+                    Header row detected at index {{ header_info.header_row_index }}.
+                    {% if merged_preview_source == 'import' %}
+                        <span class="muted">(Preview from Life Cycle Merge output — click Confirm to attach this file to the process.)</span>
+                    {% elif merged_preview_source == 'upload' %}
+                        <span class="muted">(Preview from the staged merged file — click Confirm to attach this file to the process.)</span>
+                    {% elif merged_preview_source == 'reconfirm' %}
+                        <span class="muted">(Confirmed merged file is attached, but header mapping must be confirmed again before Submit.)</span>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <p class="muted" style="margin-bottom: 16px;">Map the merged life cycle columns before you run the lookup process.</p>
+        <div class="stats">
+            {% for canonical in required_lookup_columns %}
+                <div class="stat">
+                    <strong style="font-size: 1rem;">{{ canonical }}</strong>
+                    {% if canonical in header_info.detected_mapping %}
+                        <p class="muted">Detected default: {{ header_info.detected_mapping[canonical] }}</p>
+                    {% else %}
+                        <p class="muted">No automatic match found. Select a column for processing.</p>
+                    {% endif %}
+                    <label for="header_mapping_{{ loop.index }}" class="muted">Column to use</label>
+                    <select
+                        id="header_mapping_{{ loop.index }}"
+                        class="field"
+                        name="header_mapping__{{ canonical }}"
+                        form="lookup-form"
+                    >
+                        <option value="">Select column</option>
+                        {% for column_name in header_info.available_columns %}
+                            <option
+                                value="{{ column_name }}"
+                                {% if selected_header_mapping.get(canonical) == column_name %}selected{% endif %}
+                            >
+                                {{ column_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            {% endfor %}
+        </div>
+        <div class="card" style="padding: 16px; margin-top: 16px;">
+            <h3>Available Columns</h3>
+            {% if header_info.available_columns %}
+                <p class="muted">{{ header_info.available_columns | join(", ") }}</p>
+            {% else %}
+                <p class="muted">No columns were detected in the uploaded merged file.</p>
+            {% endif %}
+            <p class="muted" style="margin-top: 10px;">
+                Header mapping applies only to the current merged file choice. Change the merged source or upload again to reconfigure.
+            </p>
+        </div>
+        <div class="actions">
+            <button class="btn" type="submit" name="action" value="confirm_mapping" form="lookup-form">Confirm</button>
+        </div>
+    </article>
+{% endif %}
+
+{% set submit_ready = (merged_life_cycle_files | length) > 0 and (rates_files | length) > 0 and header_mapping_confirmed %}
+
+<section class="workflow-layout">
+    <div class="workflow-main">
+        <form
+            id="lookup-form"
+            method="post"
+            enctype="multipart/form-data"
+            data-pending-lcm-import="{{ '1' if pending_lcm_import_rel else '0' }}"
+            data-preview-source="{{ merged_preview_source }}"
+        >
+            <article class="card">
+                <div class="section-head">
+                    <div>
+                        <h2>Valid/Invalid Lookup Form</h2>
+                        <p>Process name, upload, and submit are grouped for this workflow.</p>
+                    </div>
+                </div>
+                <div class="stack">
+                    <div class="stack">
+                        <label for="process_name_input" class="muted">Process Name</label>
+                        <input
+                            id="process_name_input"
+                            class="field"
+                            type="text"
+                            name="process_name"
+                            placeholder="Enter process name"
+                            value="{{ current_process_name }}"
+                            required
+                        >
+                    </div>
+                    <div class="stack">
+                        <span class="muted">Merged Life Cycle source</span>
+                        <div class="stack" style="gap: 8px;">
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="merged_source" value="upload" id="merged_source_upload" checked>
+                                Upload from this computer
+                            </label>
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="merged_source" value="import" id="merged_source_import">
+                                Import from Life Cycle Merge output
+                            </label>
+                        </div>
+                        <div id="merged_upload_wrap" class="stack">
+                            <label for="merged_life_cycle_input" class="muted">Merged Life Cycle file</label>
+                            <div class="actions" style="margin-top: 0;">
+                                <input id="merged_life_cycle_input" class="file-input" type="file" name="merged_life_cycle_file" accept=".xlsx,.csv,.xls" style="flex: 1 1 320px;">
+                            </div>
+                        </div>
+                        <div id="merged_import_wrap" class="stack" style="display: none;">
+                            <label for="lcm_output_import" class="muted">Output file (Life Cycle Merge → output folder only)</label>
+                            <select id="lcm_output_import" class="field" name="lcm_output_import">
+                                <option value="">Select a file from an output folder</option>
+                                {% for item in lcm_output_files %}
+                                    <option value="{{ item.relative_path }}" {% if item.relative_path == pending_lcm_import_rel %}selected{% endif %}>{{ item.label }}</option>
+                                {% endfor %}
+                            </select>
+                            {% if not lcm_output_files %}
+                                <p class="muted">No files found under <code>Life_Cycle_Merge/*/output/</code>. Run a merge first.</p>
+                            {% endif %}
+                            {% if pending_lcm_import_rel %}
+                                <p class="muted">A merge output file is selected. Review the mapping above and click <strong>Confirm</strong> to attach it to this process.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="stack">
+                        <label for="rates_input" class="muted">Rates</label>
+                        <div class="actions" style="margin-top: 0;">
+                            <input id="rates_input" class="file-input" type="file" name="rates_file" accept=".xlsx,.csv,.xls" style="flex: 1 1 320px;">
+                        </div>
+                        <p class="muted">Supported file types: {{ allowed_extensions | join(', ') }}</p>
+                    </div>
+                    <div class="actions" style="margin-top: 0;">
+                        <button class="btn" type="submit" name="action" value="upload">Upload</button>
+                    </div>
+                    {% if not submit_ready %}
+                        <p class="muted">
+                            Submit stays disabled until the merged file is confirmed from Header Mapping, the rates file is uploaded,
+                            and header mapping is saved.
+                        </p>
+                    {% endif %}
+                    <div class="actions">
+                        <button class="btn secondary" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Submit</button>
+                    </div>
+                </div>
+            </article>
+        </form>
+        <script>
+            (function () {
+                const form = document.getElementById("lookup-form");
+                const uploadRadio = document.getElementById("merged_source_upload");
+                const importRadio = document.getElementById("merged_source_import");
+                const uploadWrap = document.getElementById("merged_upload_wrap");
+                const importWrap = document.getElementById("merged_import_wrap");
+                const mergedInput = document.getElementById("merged_life_cycle_input");
+                const lcmSelect = document.getElementById("lcm_output_import");
+
+                function syncMergedSourceUi() {
+                    const useImport = importRadio && importRadio.checked;
+                    if (uploadWrap) uploadWrap.style.display = useImport ? "none" : "";
+                    if (importWrap) importWrap.style.display = useImport ? "" : "none";
+                    if (mergedInput) {
+                        mergedInput.disabled = useImport;
+                        if (useImport) mergedInput.value = "";
+                    }
+                    if (lcmSelect) lcmSelect.disabled = !useImport;
+                }
+
+                if (uploadRadio) uploadRadio.addEventListener("change", syncMergedSourceUi);
+                if (importRadio) importRadio.addEventListener("change", syncMergedSourceUi);
+
+                if (form) {
+                    form.addEventListener("submit", function (e) {
+                        const submitter = e.submitter;
+                        const action = submitter && submitter.getAttribute("value");
+                        const useImport = importRadio && importRadio.checked;
+                        if (action === "upload" && useImport && lcmSelect && !lcmSelect.value) {
+                            e.preventDefault();
+                            alert("Please select a merged file from a Life Cycle Merge output folder.");
+                            return;
+                        }
+                        if (action === "upload" && !useImport && mergedInput && (!mergedInput.files || !mergedInput.files.length)) {
+                            e.preventDefault();
+                            alert("Please choose a merged life cycle file to upload.");
+                            return;
+                        }
+                    });
+                }
+
+                if (form && (form.dataset.pendingLcmImport === "1" || form.dataset.previewSource === "import")) {
+                    if (importRadio) importRadio.checked = true;
+                    if (uploadRadio) uploadRadio.checked = false;
+                }
+                syncMergedSourceUi();
+            })();
+        </script>
+    </div>
+
+    <aside class="workflow-sidebar">
+        <article class="list-card">
+            <div class="section-head">
+                <div>
+                    <h2>Uploaded Files</h2>
+                    <p>Files currently stored in the selected process input folders.</p>
+                </div>
+            </div>
+            {% if merged_life_cycle_files or rates_files %}
+                <ul class="data-list">
+                    {% for filename in merged_life_cycle_files %}
+                        <li class="data-row">
+                            <span class="data-name">Merged Life Cycle: {{ filename }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="file_kind" value="merged_life_cycle">
+                                <input type="hidden" name="filename" value="{{ filename }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                    {% for filename in rates_files %}
+                        <li class="data-row">
+                            <span class="data-name">Rates: {{ filename }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="file_kind" value="rates">
+                                <input type="hidden" name="filename" value="{{ filename }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <div class="empty-state">
+                    <p>No files uploaded yet for this process.</p>
+                </div>
+            {% endif %}
+        </article>
+    </aside>
+</section>
+{% endblock %}

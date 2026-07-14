@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Exempt Query{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Process Group</p>
+        <h1>Exempt Query</h1>
+        <p>Exempt Query is a separate workflow from {{ merge_valid_lookup_group_label }}. Portal integration for this process is coming soon.</p>
+    </div>
+    <div class="actions" style="margin-top: 0;">
+        <a class="btn secondary" href="{{ url_for('home') }}">Back to Home</a>
+    </div>
+</section>
+
+<section class="grid cols-2">
+    <article class="card">
+        <h3 class="card-title">Run via Scripts</h3>
+        <p>Use the Python pipeline under <code>Exempt Query/python scripts csv/</code>. Place inputs in <code>input/</code> and collect outputs from <code>output/</code>.</p>
+        <p class="muted">See <code>How_to_Run.md</code> in that folder for step-by-step instructions.</p>
+    </article>
+    <article class="card">
+        <h3 class="card-title">Browse Folders</h3>
+        <p>Process folders for Exempt Query will be stored under <code>File_Process/{{ exempt_query_folder }}/</code>.</p>
+        <div class="actions">
+            <a class="btn secondary" href="{{ url_for('file_process_directories', path=exempt_query_folder) }}">Open in Directory Browser</a>
+        </div>
+    </article>
+</section>
+{% endblock %}

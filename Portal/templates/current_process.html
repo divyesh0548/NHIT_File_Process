@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Process Management{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Process Management</p>
+        <h1>Available Processes</h1>
+        <p>This list shows top-level process groups currently available under <code>File_Process</code>.</p>
+    </div>
+</section>
+
+<article id="merge-status-card" class="card" style="margin-bottom: 22px;">
+    <div class="section-head">
+        <div>
+            <h2>Life Cycle Merge Process</h2>
+            <p id="merge-status-text">
+                {% if life_cycle_state.running %}
+                    Processing is ongoing for "{{ life_cycle_state.process_name }}".
+                {% elif life_cycle_state.last_status %}
+                    {{ life_cycle_state.last_status }}
+                {% else %}
+                    No Life cycle merge process is running.
+                {% endif %}
+            </p>
+            <p id="merge-status-time" class="muted">
+                {% if life_cycle_state.running and life_cycle_state.started_at %}
+                    Elapsed: calculating...
+                {% else %}
+                    Elapsed: -
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</article>
+
+<article id="valid-invalid-status-card" class="card" style="margin-bottom: 22px;">
+    <div class="section-head">
+        <div>
+            <h2>Valid/Invalid Lookup Process</h2>
+            <p id="valid-invalid-status-text">
+                {% if valid_invalid_state.running %}
+                    Processing is ongoing for "{{ valid_invalid_state.process_name }}".
+                {% elif valid_invalid_state.last_status %}
+                    {{ valid_invalid_state.last_status }}
+                {% else %}
+                    No Valid/Invalid Lookup process is running.
+                {% endif %}
+            </p>
+            <p id="valid-invalid-status-time" class="muted">
+                {% if valid_invalid_state.running and valid_invalid_state.started_at %}
+                    Elapsed: calculating...
+                {% else %}
+                    Elapsed: -
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</article>
+
+<article class="list-card">
+    <div class="section-head">
+        <div>
+            <h2>Process Folders</h2>
+            <p>Same process listing currently shown from the folder browser.</p>
+        </div>
+    </div>
+    {% if process_directories %}
+        <ul class="data-list">
+            {% for dirname in process_directories %}
+                <li class="data-row">
+                    <span class="data-name">{{ dirname }}</span>
+                    <a class="btn secondary" href="{{ url_for('file_process_directories', path=dirname) }}">Open</a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <div class="empty-state">
+            <p>No process folders found.</p>
+        </div>
+    {% endif %}
+</article>
+
+<script>
+    const mergeStatusText = document.getElementById("merge-status-text");
+    const mergeStatusTime = document.getElementById("merge-status-time");
+    const validInvalidStatusText = document.getElementById("valid-invalid-status-text");
+    const validInvalidStatusTime = document.getElementById("valid-invalid-status-time");
+
+    function formatElapsed(seconds) {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+        if (mins > 0) return `${mins}m ${secs}s`;
+        return `${secs}s`;
+    }
+
+    async function refreshMergeStatus() {
+        try {
+            const response = await fetch("{{ url_for('life_cycle_merge_status') }}");
+            if (!response.ok) return;
+            const state = await response.json();
+
+            if (state.running) {
+                mergeStatusText.textContent = `Processing is ongoing for "${state.process_name}".`;
+                mergeStatusTime.textContent = `Elapsed: ${formatElapsed(state.elapsed_seconds || 0)}`;
+            } else {
+                mergeStatusText.textContent = state.last_status || "No Life cycle merge process is running.";
+                mergeStatusTime.textContent = "Elapsed: -";
+            }
+        } catch (err) {
+            // Ignore intermittent polling errors and keep previous status.
+        }
+    }
+
+    async function refreshValidInvalidStatus() {
+        try {
+            const response = await fetch("{{ url_for('valid_invalid_status') }}");
+            if (!response.ok) return;
+            const state = await response.json();
+
+            if (state.running) {
+                validInvalidStatusText.textContent = `Processing is ongoing for "${state.process_name}".`;
+                validInvalidStatusTime.textContent = `Elapsed: ${formatElapsed(state.elapsed_seconds || 0)}`;
+            } else {
+                validInvalidStatusText.textContent = state.last_status || "No Valid/Invalid Lookup process is running.";
+                validInvalidStatusTime.textContent = "Elapsed: -";
+            }
+        } catch (err) {
+            // Ignore intermittent polling errors and keep previous status.
+        }
+    }
+
+    refreshMergeStatus();
+    refreshValidInvalidStatus();
+    setInterval(refreshMergeStatus, 3000);
+    setInterval(refreshValidInvalidStatus, 3000);
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+First Query
+
+1. Merge Life cycle files of 6 months. (Challenge --> Files could be in xlsx, csv or .xls)
+
+Takes around 30 minutes to process, if files are not .csv
+For .csv processing is faster = Time : 
+Life_cycle_merge_all_columns.py --> This program performs this operation and it includes all new/distinct columns in output file.
+
+2. After the merge operation the final output file is processed using input_valid_invalid.py file, which also requires rates file for that plaza. (Pullur Rates Q4.xlsx).
+
+
+
+
+
+
+Second Query
+
+Steps : 
+1. Convert all VRN and lifecycle files into .csv before processing.
+
+2. Then apply Normaliation and force type of data in some columns.
+
+3. After Normaliation of VRN and LC file. Copy {"Date & Time", "Veh Reg No.", "MOP", "Lane No"} columns from LC and append into VRN file of same month.
+
+4. Then merge these columns {[#"Veh Reg No."], Text.From([#"Date & Time"], "en-IN"), [MOP]}, and remove duplicate rows from the merged column.
+
+5. After this apply 7 consecutive python scripts.

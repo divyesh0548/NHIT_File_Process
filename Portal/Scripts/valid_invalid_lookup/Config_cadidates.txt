@@ -1,0 +1,12 @@
+1. Journey types to drop - Line 168
+2. Status column cadidates - Line 195
+3. Accepted Values cadidates - Line 199
+4. Journey type normalization - Line 211
+5. Journey columns from Rate sheet - Line 236
+6. Excluded vehicle classes from Lifecycle - Line 249
+7. Bus vehicle classes for processing them differently (In function "vehicle_lifecycle" bus classes plus other keywords are used to configure them seperately) - Line 302
+8. Heavy/Special classes - Line 251
+9. vehicle classes normalization list - Line 362
+10. Distinct values of journey type columns - Line 444
+11. Journey Type values for Discounted/Pass journeys - Line 474
+12. Invalid exlcuded classes - Line 500

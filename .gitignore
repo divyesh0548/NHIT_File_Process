@@ -9,7 +9,6 @@
 #   - Secrets (.env)
 
 # --- Track only Python (+ minimal repo metadata) ---
-*
 !*/
 !**/*.py
 !.gitignore

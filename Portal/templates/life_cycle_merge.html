@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+
+{% block title %}Life Cycle Merge{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Process Intake</p>
+        <h1>Life Cycle Merge</h1>
+        <p>Upload source files, review the current input set, and submit the merge when the process is ready.</p>
+    </div>
+    <div class="actions" style="margin-top: 0;">
+        <a class="btn secondary" href="{{ url_for('merge_valid_lookup_hub') }}">Back to {{ merge_valid_lookup_group_label }}</a>
+        <button
+            type="button"
+            class="btn secondary"
+            id="header-keywords-open-btn"
+            data-bs-toggle="modal"
+            data-bs-target="#headerKeywordsModal"
+        >
+            Header Keywords
+        </button>
+    </div>
+</section>
+
+{% if messages %}
+    <div class="message-list">
+        {% for message_type, message in messages %}
+            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<article id="merge-status-card" class="card" style="margin-bottom: 22px;">
+    <div class="section-head">
+        <div>
+            <h2>Merge Status</h2>
+            <p id="merge-status-text">
+                {% if life_cycle_state.running %}
+                    Processing is ongoing for "{{ life_cycle_state.process_name }}".
+                {% elif life_cycle_state.last_status %}
+                    {{ life_cycle_state.last_status }}
+                {% else %}
+                    No Life cycle merge process is running.
+                {% endif %}
+            </p>
+            <p id="merge-status-time" class="muted">
+                {% if life_cycle_state.running and life_cycle_state.started_at %}
+                    Elapsed: calculating...
+                {% else %}
+                    Elapsed: -
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</article>
+
+<section class="workflow-layout">
+    <div class="workflow-main">
+        <article class="card">
+            <div class="section-head">
+                <div>
+                    <h2>Life Cycle / Etc Files Merge</h2>
+                    <p>Process name, file upload, and final submit are grouped here because they belong to the same workflow.</p>
+                </div>
+            </div>
+            <form id="upload-form" method="post" enctype="multipart/form-data" class="stack">
+                <div class="stack">
+                    <label for="process_name_input" class="muted">Process Name</label>
+                    <input
+                        id="process_name_input"
+                        class="field"
+                        type="text"
+                        name="process_name"
+                        placeholder="Enter process name"
+                        value="{{ current_process_name }}"
+                        required
+                    >
+                </div>
+                <div class="stack">
+                    <label for="files_input" class="muted">Upload Files</label>
+                    <div class="actions" style="margin-top: 0;">
+                        <input id="files_input" class="file-input" type="file" name="files" multiple accept=".xlsx,.csv,.xls" style="flex: 1 1 320px;">
+                        <button id="upload-btn" class="btn" type="submit" name="action" value="upload" {% if life_cycle_state.running %}disabled{% endif %}>Upload Files</button>
+                    </div>
+                    <p class="muted">Supported file types: {{ allowed_extensions | join(', ') }}</p>
+                    <p class="muted">At least {{ min_life_cycle_merge_files }} files are required before Submit is enabled.</p>
+                </div>
+                <div class="stats">
+                    <div class="stat">
+                        <strong>{{ uploaded_files | length }}</strong>
+                        <span class="muted">Uploaded file(s) in the current process folder</span>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button
+                        id="final-submit-btn"
+                        class="btn"
+                        type="submit"
+                        name="action"
+                        value="process"
+                        {% if life_cycle_state.running or (uploaded_files | length) < min_life_cycle_merge_files %}disabled{% endif %}
+                    >
+                        Submit
+                    </button>
+                </div>
+            </form>
+        </article>
+    </div>
+
+    <aside class="workflow-sidebar">
+        <article class="list-card">
+            <div class="section-head">
+                <div>
+                    <h2>Uploaded Files</h2>
+                    <p>Files currently stored in the selected process input folder.</p>
+                </div>
+            </div>
+            {% if uploaded_files %}
+                <ul class="data-list">
+                    {% for filename in uploaded_files %}
+                        <li class="data-row">
+                            <span class="data-name">{{ filename }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="filename" value="{{ filename }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <div class="empty-state">
+                    <p>No files uploaded yet for this process.</p>
+                </div>
+            {% endif %}
+        </article>
+    </aside>
+</section>
+
+<div class="modal fade" id="headerKeywordsModal" tabindex="-1" aria-labelledby="headerKeywordsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content header-keywords-modal">
+            <div class="modal-header">
+                <h5 class="modal-title" id="headerKeywordsModalLabel">Header Keywords ({{ lc_etc_file_type }})</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="muted">Each keyword is stored as one row in <code>nhit_file_process</code>. At least 3 keywords are required for merge header detection.</p>
+                <div id="header-keywords-error" class="message error" style="display: none; margin-bottom: 14px;"></div>
+                <form id="header-keyword-add-form" class="stack" style="margin-bottom: 18px;">
+                    <label for="header_keyword_add_input" class="muted">Add keyword</label>
+                    <div class="actions" style="margin-top: 0;">
+                        <input id="header_keyword_add_input" class="field" type="text" placeholder="Enter header keyword" required>
+                        <button class="btn" type="submit">Add</button>
+                    </div>
+                </form>
+                <ul id="header-keywords-list" class="data-list"></ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .header-keywords-modal {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+    }
+    .header-keywords-modal .modal-header,
+    .header-keywords-modal .modal-footer {
+        border-color: var(--border);
+    }
+    .header-keywords-modal .modal-title {
+        color: #f4f7fa;
+    }
+</style>
+
+<script>
+    const resetFormAfterSubmit = "{{ '1' if reset_form_after_submit else '0' }}" === "1";
+    const uploadForm = document.getElementById("upload-form");
+    const processNameInput = document.getElementById("process_name_input");
+    const filesInput = document.getElementById("files_input");
+    const uploadBtn = document.getElementById("upload-btn");
+    const finalSubmitBtn = document.getElementById("final-submit-btn");
+    const mergeStatusText = document.getElementById("merge-status-text");
+    const mergeStatusTime = document.getElementById("merge-status-time");
+    const minMergeFiles = {{ min_life_cycle_merge_files }};
+    const uploadedFileCount = {{ uploaded_files | length }};
+
+    function formatElapsed(seconds) {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+        if (mins > 0) return `${mins}m ${secs}s`;
+        return `${secs}s`;
+    }
+
+    function applyRunningState(running) {
+        if (uploadBtn) uploadBtn.disabled = running;
+        if (filesInput) filesInput.disabled = running;
+        if (finalSubmitBtn) {
+            finalSubmitBtn.disabled = running || uploadedFileCount < minMergeFiles;
+        }
+    }
+
+    async function refreshMergeStatus() {
+        try {
+            const response = await fetch("{{ url_for('life_cycle_merge_status') }}");
+            if (!response.ok) return;
+            const state = await response.json();
+            applyRunningState(Boolean(state.running));
+
+            if (state.running) {
+                mergeStatusText.textContent = `Processing is ongoing for "${state.process_name}".`;
+                mergeStatusTime.textContent = `Elapsed: ${formatElapsed(state.elapsed_seconds || 0)}`;
+            } else {
+                mergeStatusText.textContent = state.last_status || "No Life cycle merge process is running.";
+                mergeStatusTime.textContent = "Elapsed: -";
+            }
+        } catch (err) {
+            // Keep UI stable if polling fails temporarily.
+        }
+    }
+
+    if (processNameInput) {
+        processNameInput.focus();
+    }
+    if (resetFormAfterSubmit && uploadForm) {
+        uploadForm.reset();
+    }
+    refreshMergeStatus();
+    setInterval(refreshMergeStatus, 3000);
+
+    const headerKeywordsList = document.getElementById("header-keywords-list");
+    const headerKeywordsError = document.getElementById("header-keywords-error");
+    const headerKeywordAddForm = document.getElementById("header-keyword-add-form");
+    const headerKeywordAddInput = document.getElementById("header_keyword_add_input");
+    const headerKeywordsModal = document.getElementById("headerKeywordsModal");
+    const headerKeywordsApiBase = "{{ url_for('api_list_lc_etc_header_keywords') }}";
+
+    function showHeaderKeywordsError(message) {
+        if (!headerKeywordsError) return;
+        if (!message) {
+            headerKeywordsError.style.display = "none";
+            headerKeywordsError.textContent = "";
+            return;
+        }
+        headerKeywordsError.textContent = message;
+        headerKeywordsError.style.display = "block";
+    }
+
+    function renderHeaderKeywordsList(keywords) {
+        if (!headerKeywordsList) return;
+        headerKeywordsList.innerHTML = "";
+        if (!keywords.length) {
+            const empty = document.createElement("li");
+            empty.className = "empty-state";
+            empty.innerHTML = "<p>No keywords found.</p>";
+            headerKeywordsList.appendChild(empty);
+            return;
+        }
+
+        keywords.forEach((item) => {
+            const li = document.createElement("li");
+            li.className = "data-row";
+            li.dataset.keywordId = String(item.id);
+
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "data-name";
+            nameSpan.textContent = item.header_keywords;
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "btn danger";
+            deleteBtn.textContent = "Delete";
+            deleteBtn.addEventListener("click", async () => {
+                if (!window.confirm(`Delete keyword "${item.header_keywords}"?`)) {
+                    return;
+                }
+                try {
+                    const response = await fetch(`${headerKeywordsApiBase}/${item.id}`, {
+                        method: "DELETE",
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || "Delete failed.");
+                    }
+                    showHeaderKeywordsError("");
+                    await loadHeaderKeywords();
+                } catch (err) {
+                    showHeaderKeywordsError(err.message || "Delete failed.");
+                }
+            });
+
+            const actions = document.createElement("div");
+            actions.className = "actions";
+            actions.style.margin = "0";
+            actions.append(deleteBtn);
+
+            li.append(nameSpan, actions);
+            headerKeywordsList.appendChild(li);
+        });
+    }
+
+    async function loadHeaderKeywords() {
+        try {
+            const response = await fetch(headerKeywordsApiBase);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Could not load header keywords.");
+            }
+            renderHeaderKeywordsList(data.keywords || []);
+            showHeaderKeywordsError("");
+        } catch (err) {
+            showHeaderKeywordsError(err.message || "Could not load header keywords.");
+        }
+    }
+
+    if (headerKeywordAddForm) {
+        headerKeywordAddForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const keyword = (headerKeywordAddInput?.value || "").trim();
+            if (!keyword) {
+                showHeaderKeywordsError("Header keyword cannot be empty.");
+                return;
+            }
+            try {
+                const response = await fetch("{{ url_for('api_add_lc_etc_header_keyword') }}", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ header_keywords: keyword }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Add failed.");
+                }
+                if (headerKeywordAddInput) {
+                    headerKeywordAddInput.value = "";
+                }
+                showHeaderKeywordsError("");
+                await loadHeaderKeywords();
+            } catch (err) {
+                showHeaderKeywordsError(err.message || "Add failed.");
+            }
+        });
+    }
+
+    if (headerKeywordsModal) {
+        headerKeywordsModal.addEventListener("shown.bs.modal", loadHeaderKeywords);
+    }
+</script>
+{% endblock %}
