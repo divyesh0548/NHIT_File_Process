@@ -1,10 +1,3 @@
-"""
-Central place for header detection keywords and column/header mappings used by Portal jobs.
-
-LC/ETC merge header keywords are stored in the `nhit_file_process` database table.
-See `db.nhit_file_process` for load/save helpers.
-"""
-
 VALID_INVALID_LOOKUP_HEADER_MAPPING = {
     "Journey Type": [
         "Journey Type",
