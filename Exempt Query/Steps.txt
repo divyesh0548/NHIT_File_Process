@@ -6,11 +6,13 @@ Average time to convert a .xlsx into .csv = 2.5 Mins (7 Lakh Rows)
 Steps : 
 
 1. Convert all VRN and lifecycle files into .csv before processing.
+
 2. Then apply Normaliation and force type of data in some columns.
 
 (For converting and Normaliation use "normalize_vrn.py" and "normalize_lcy.py")
 
 3. After Normaliation of VRN and LC file. Copy {"Date & Time", "Veh Reg No.", "MOP", "Lane No"} these column from LC and append into VRN file of same month.
+
 4. Then merge these columns {[#"Veh Reg No."], Text.From([#"Date & Time"], "en-IN"), [MOP]}, and remove duplicate rows from the merged column.
 
 (For performing above operation use vrn_lc_final_prcess.py, pass the merged output file path of VRN and LC/ETC)

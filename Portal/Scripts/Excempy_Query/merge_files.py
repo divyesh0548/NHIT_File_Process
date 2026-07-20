@@ -1,18 +1,20 @@
 import os
 import shutil
+import sys
 import tempfile
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-import sys
 from time import perf_counter
 
 import pandas as pd
 
-_PORTAL_ROOT = Path(__file__).resolve().parent.parent
+_PORTAL_ROOT = Path(__file__).resolve().parents[2]
 if str(_PORTAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_PORTAL_ROOT))
 
 from header_matching import normalize_header_match
+
+INTERRUPT_EXIT_CODE = 130
 
 HEADER_SCAN_ROWS = 50
 FINAL_MERGE_CHUNK_ROWS = 100_000
@@ -54,24 +56,50 @@ def _read_csv_fast(file_path):
         return pd.read_csv(file_path, low_memory=False)
 
 
-def find_header_csv(df, header_keywords, file_name):
+def find_header_csv(file_path, header_keywords, file_name, scan_rows=HEADER_SCAN_ROWS):
     """
-    Finds the header row in a CSV DataFrame based on the presence of given header keywords.
-    At least 3 keywords must be detected in the columns (matched with normalized column names).
+    Detect the header row in a CSV file.
+
+    Headers always start at column index 0 (leading empty columns are kept).
+    Only the row index is detected — never a column offset.
     """
+    df = _read_csv_fast(file_path)
     norm_to_original = {_normalize_col_name(c): c for c in df.columns}
-    matched_keywords = []
-    for keyword in header_keywords:
-        nk = _normalize_col_name(keyword)
-        if nk in norm_to_original:
-            matched_keywords.append(norm_to_original[nk])
+    match_count = sum(
+        1 for keyword in header_keywords if _normalize_col_name(keyword) in norm_to_original
+    )
 
-    if len(matched_keywords) >= 3:
-        start_idx = df.columns.get_loc(matched_keywords[0])
-        print(f"Header detected in {file_name} at column index {start_idx} with keywords {matched_keywords}")
-        df = df.iloc[:, start_idx:]
+    if match_count >= 3:
+        print(
+            f"Header detected in {file_name} at row index 0 "
+            f"({match_count} keyword match(es) in column names)"
+        )
+        return df
 
-    return df
+    try:
+        df_sample = pd.read_csv(
+            file_path, header=None, dtype=str, nrows=scan_rows, low_memory=False
+        )
+    except Exception:
+        df_sample = pd.read_csv(
+            file_path,
+            header=None,
+            dtype=str,
+            nrows=scan_rows,
+            low_memory=False,
+            encoding="cp1252",
+        )
+
+    if df_sample.empty:
+        return df
+
+    header_idx = _detect_header_row_index(df_sample, header_keywords)
+    print(f"Header detected in {file_name} at row index {header_idx}")
+
+    try:
+        return pd.read_csv(file_path, skiprows=header_idx, header=0, engine="pyarrow")
+    except Exception:
+        return pd.read_csv(file_path, skiprows=header_idx, header=0, low_memory=False)
 
 
 def find_header_excel(excel_data, sheet_name, header_keywords, file_name, scan_rows=HEADER_SCAN_ROWS):
@@ -98,8 +126,7 @@ def find_header_excel(excel_data, sheet_name, header_keywords, file_name, scan_r
 def _load_dataframe_for_file(file, header_keywords):
     """Load one file once, including all Excel sheets when present."""
     if file.lower().endswith(".csv"):
-        df = _read_csv_fast(file)
-        return find_header_csv(df, header_keywords, file)
+        return find_header_csv(file, header_keywords, file)
 
     if file.lower().endswith((".xls", ".xlsx")):
         excel_data = pd.ExcelFile(file)
@@ -186,17 +213,44 @@ def _append_staged_csvs(output_file, staged_files, canonical_order, norm_to_cano
     output_headers = [norm_to_canonical[col] for col in canonical_order]
     pd.DataFrame(columns=output_headers).to_csv(output_file, index=False)
 
-    for staged_file in staged_files:
-        staged_path = staged_file["temp_path"]
-        for chunk in pd.read_csv(
-            staged_path,
-            chunksize=FINAL_MERGE_CHUNK_ROWS,
-            low_memory=False,
-            dtype=str,
-        ):
-            chunk = chunk.reindex(columns=canonical_order)
-            chunk.columns = output_headers
-            chunk.to_csv(output_file, mode="a", header=False, index=False)
+    try:
+        for staged_file in staged_files:
+            staged_path = staged_file["temp_path"]
+            for chunk in pd.read_csv(
+                staged_path,
+                chunksize=FINAL_MERGE_CHUNK_ROWS,
+                low_memory=False,
+                dtype=str,
+            ):
+                chunk = chunk.reindex(columns=canonical_order)
+                chunk.columns = output_headers
+                chunk.to_csv(output_file, mode="a", header=False, index=False)
+    except KeyboardInterrupt:
+        if os.path.exists(output_file):
+            try:
+                os.remove(output_file)
+            except OSError:
+                pass
+        raise
+
+
+def _starmap_with_interrupt(pool, func, iterable):
+    """
+    Run pool.starmap but kill worker processes on Ctrl+C.
+
+    On Windows, Pool workers ignore SIGINT; without terminate() the main process
+    blocks until every worker finishes even after Ctrl+C.
+    """
+    try:
+        return pool.starmap(func, iterable, chunksize=1)
+    except KeyboardInterrupt:
+        print(
+            "\nInterrupted (Ctrl+C). Stopping worker processes...",
+            flush=True,
+        )
+        pool.terminate()
+        pool.join()
+        raise SystemExit(INTERRUPT_EXIT_CODE) from None
 
 
 def merge_files_in_folder(folder_path, output_file, header_keywords):
@@ -220,14 +274,18 @@ def merge_files_in_folder(folder_path, output_file, header_keywords):
     print(f"Processing the following files: {files_to_process}")
 
     temp_dir = tempfile.mkdtemp(prefix="life_cycle_merge_", dir=folder_path)
+    pool = None
     try:
         worker_count = max(1, cpu_count())
-        with Pool(processes=worker_count) as pool:
-            staged_results = pool.starmap(
-                process_file_to_temp,
-                [(file, header_keywords, temp_dir) for file in files_to_process],
-                chunksize=1,
-            )
+        pool = Pool(processes=worker_count)
+        staged_results = _starmap_with_interrupt(
+            pool,
+            process_file_to_temp,
+            [(file, header_keywords, temp_dir) for file in files_to_process],
+        )
+        pool.close()
+        pool.join()
+        pool = None
 
         staged_files = [
             staged_result
@@ -241,25 +299,41 @@ def merge_files_in_folder(folder_path, output_file, header_keywords):
         canonical_order, norm_to_canonical = _build_canonical_columns(staged_files)
         print(f"Union column count: {len(canonical_order)}")
 
-        _append_staged_csvs(output_file, staged_files, canonical_order, norm_to_canonical)
+        try:
+            _append_staged_csvs(output_file, staged_files, canonical_order, norm_to_canonical)
+        except KeyboardInterrupt:
+            print(
+                "\nInterrupted (Ctrl+C) during final merge. Partial output removed.",
+                flush=True,
+            )
+            raise SystemExit(INTERRUPT_EXIT_CODE) from None
 
         total_elapsed = perf_counter() - merge_start
         print(f"Files merged successfully into {output_file} using {worker_count} workers")
         print(f"Total merge duration: {total_elapsed:.2f} seconds")
+    except KeyboardInterrupt:
+        if pool is not None:
+            print(
+                "\nInterrupted (Ctrl+C). Stopping worker processes...",
+                flush=True,
+            )
+            pool.terminate()
+            pool.join()
+        raise SystemExit(INTERRUPT_EXIT_CODE) from None
     finally:
+        if pool is not None:
+            pool.terminate()
+            pool.join()
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
-    import sys
-
-    portal_root = Path(__file__).resolve().parent.parent
-    if str(portal_root) not in sys.path:
-        sys.path.insert(0, str(portal_root))
-
-    from db.nhit_file_process import get_lc_etc_header_keyword_strings
-
-    folder_path = "Life Cycle Report"
-    output_file = "merged_output_life_cycle_report_with_all_columns.csv"
-    header_keywords = get_lc_etc_header_keyword_strings()
-    merge_files_in_folder(folder_path, output_file, header_keywords)
+    folder_path = "etc/etc_files"
+    output_file = "daroda_merged_etc.csv"
+    header_keywords = ["Agency Txn Id", "Settlement Amount", "Plaza ID", "Violation Amts"]
+    try:
+        merge_files_in_folder(folder_path, output_file, header_keywords)
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            sys.exit(exc.code)
+        raise

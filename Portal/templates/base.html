@@ -277,14 +277,21 @@
             color: #f4f7fa;
         }
         .field,
-        .file-input {
+        .file-input,
+        select.field {
             width: 100%;
-            padding: 11px 12px;
+            height: 40px;
+            padding: 0 12px;
             border-radius: 4px;
             border: 1px solid var(--border);
             background: #151b24;
             color: var(--text);
             font: inherit;
+            box-sizing: border-box;
+            line-height: 1.2;
+        }
+        select.field {
+            padding-right: 28px;
         }
         .field option {
             background: #151b24;
@@ -296,18 +303,74 @@
             border-color: rgba(46, 168, 106, 0.55);
             box-shadow: 0 0 0 4px rgba(46, 168, 106, 0.16);
         }
+        .file-input {
+            display: flex;
+            align-items: center;
+            padding: 0 8px 0 0;
+        }
         .file-input::file-selector-button {
-            margin-right: 12px;
-            padding: 8px 12px;
+            height: 28px;
+            margin-right: 10px;
+            padding: 0 10px;
             border: 1px solid var(--border);
             border-radius: 4px;
             background: rgba(255, 255, 255, 0.08);
             color: var(--text);
             font: inherit;
             cursor: pointer;
+            line-height: 28px;
         }
         .file-input::file-selector-button:hover {
             background: rgba(255, 255, 255, 0.12);
+        }
+        .form-control-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .form-control-row .field,
+        .form-control-row .file-input {
+            flex: 1 1 280px;
+            min-width: 0;
+        }
+        .form-control-row .btn {
+            height: 40px;
+            padding: 0 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .keywords-loading {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
+        }
+        .keywords-loading-spinner {
+            width: 22px;
+            height: 22px;
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: keywords-spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes keywords-spin {
+            to { transform: rotate(360deg); }
+        }
+        .header-keywords-modal {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .header-keywords-modal .modal-header,
+        .header-keywords-modal .modal-footer {
+            border-color: var(--border);
+        }
+        .header-keywords-modal .modal-title {
+            color: #f4f7fa;
         }
         .stack {
             display: grid;
@@ -488,7 +551,7 @@
             <nav class="nav">
                 <a class="{{ 'active' if request.endpoint == 'home' else '' }}" href="{{ url_for('home') }}">Home</a>
                 <a class="{{ 'active' if request.endpoint in ('merge_valid_lookup_hub', 'life_cycle_merge', 'valid_invalid_lookup') else '' }}" href="{{ url_for('merge_valid_lookup_hub') }}">{{ merge_valid_lookup_group_label }}</a>
-                <a class="{{ 'active' if request.endpoint == 'exempt_query_hub' else '' }}" href="{{ url_for('exempt_query_hub') }}">Exempt Query</a>
+                <a class="{{ 'active' if request.endpoint in ('exempt_query_hub', 'merge_normalize', 'merge_remove_duplicate') else '' }}" href="{{ url_for('exempt_query_hub') }}">Exempt Query</a>
                 <a class="{{ 'active' if request.endpoint == 'file_process_directories' else '' }}" href="{{ url_for('file_process_directories') }}">Directories</a>
                 <a class="{{ 'active' if request.endpoint == 'current_process' else '' }}" href="{{ url_for('current_process') }}">Process Management</a>
             </nav>

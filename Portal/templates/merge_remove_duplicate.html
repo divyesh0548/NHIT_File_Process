@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}{{ merge_remove_dup_group_label }}{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Exempt Query</p>
+        <h1>{{ merge_remove_dup_group_label }}</h1>
+        <p>Combine VRN and LC/ETC outputs from Merge + Normalize, remove duplicates, and write <code>{{ semi_final_output_filename }}</code>.</p>
+    </div>
+    <div class="actions" style="margin-top: 0;">
+        <a class="btn secondary" href="{{ url_for('exempt_query_hub') }}">Back to Exempt Query</a>
+    </div>
+</section>
+
+{% if messages %}
+    <div class="message-list">
+        {% for message_type, message in messages %}
+            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">
+                {{ message }}
+                {% if message_type == 'success' and 'Process Management' in message %}
+                    <a href="{{ url_for('current_process') }}" style="margin-left: 6px;">Open Process Management</a>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<section class="workflow-layout">
+    <div class="workflow-main">
+        <form id="merge-remove-dup-form" method="post" enctype="multipart/form-data" class="stack">
+            <article class="card">
+                <div class="section-head">
+                    <div>
+                        <h2>Process Inputs</h2>
+                        <p>Both VRN and LC/ETC files are required before Submit. Import from Merge + Normalize output folders or upload CSV manually.</p>
+                    </div>
+                </div>
+                <div class="stack">
+                    <div class="stack">
+                        <label for="process_name_input" class="muted">Process Name</label>
+                        <input
+                            id="process_name_input"
+                            class="field"
+                            type="text"
+                            name="process_name"
+                            placeholder="Enter process name"
+                            value="{{ current_process_name }}"
+                            required
+                        >
+                    </div>
+
+                    <div class="card" style="padding: 16px;">
+                        <h3 style="margin-bottom: 10px;">VRN file</h3>
+                        <div class="stack" style="gap: 8px; margin-bottom: 12px;">
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="vrn_source" value="upload" id="vrn_source_upload" checked>
+                                Upload from this computer
+                            </label>
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="vrn_source" value="import" id="vrn_source_import">
+                                Import from Merge + Normalize (VRN) output
+                            </label>
+                        </div>
+                        <div id="vrn_upload_wrap" class="stack">
+                            <label for="vrn_file_input" class="muted">VRN CSV</label>
+                            <div class="form-control-row">
+                                <input id="vrn_file_input" class="file-input" type="file" name="vrn_file" accept=".csv">
+                            </div>
+                        </div>
+                        <div id="vrn_import_wrap" class="stack" style="display: none;">
+                            <label for="vrn_import_select" class="muted">Merge + Normalize VRN output</label>
+                            <select id="vrn_import_select" class="field" name="vrn_import">
+                                <option value="">Select VRN output file</option>
+                                {% for item in vrn_outputs %}
+                                    <option value="{{ item.relative_path }}">{{ item.label }}</option>
+                                {% endfor %}
+                            </select>
+                            {% if not vrn_outputs %}
+                                <p class="muted">No VRN outputs found under Merge + Normalize. Run that step first.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="card" style="padding: 16px;">
+                        <h3 style="margin-bottom: 10px;">LC/ETC file</h3>
+                        <div class="stack" style="gap: 8px; margin-bottom: 12px;">
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="lc_source" value="upload" id="lc_source_upload" checked>
+                                Upload from this computer
+                            </label>
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="lc_source" value="import" id="lc_source_import">
+                                Import from Merge + Normalize (LC/ETC) output
+                            </label>
+                        </div>
+                        <div id="lc_upload_wrap" class="stack">
+                            <label for="lc_file_input" class="muted">LC/ETC CSV</label>
+                            <div class="form-control-row">
+                                <input id="lc_file_input" class="file-input" type="file" name="lc_file" accept=".csv">
+                            </div>
+                        </div>
+                        <div id="lc_import_wrap" class="stack" style="display: none;">
+                            <label for="lc_import_select" class="muted">Merge + Normalize LC/ETC output</label>
+                            <select id="lc_import_select" class="field" name="lc_import">
+                                <option value="">Select LC/ETC output file</option>
+                                {% for item in lc_outputs %}
+                                    <option value="{{ item.relative_path }}">{{ item.label }}</option>
+                                {% endfor %}
+                            </select>
+                            {% if not lc_outputs %}
+                                <p class="muted">No LC/ETC outputs found under Merge + Normalize. Run that step first.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="form-control-row">
+                        <button class="btn" type="submit" name="action" value="upload">Apply Inputs</button>
+                    </div>
+
+                    {% if not submit_ready %}
+                        <p class="muted">Submit stays disabled until both VRN and LC/ETC files are attached to this process.</p>
+                    {% endif %}
+                    <div class="actions">
+                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Start Merge + Remove Duplicate</button>
+                    </div>
+                </div>
+            </article>
+        </form>
+    </div>
+
+    <aside class="workflow-sidebar">
+        <article class="list-card">
+            <div class="section-head">
+                <div>
+                    <h2>Attached Files</h2>
+                    <p>Files stored for the current process.</p>
+                </div>
+            </div>
+            {% if vrn_files or lc_files %}
+                <ul class="data-list">
+                    {% for filename in vrn_files %}
+                        <li class="data-row">
+                            <span class="data-name">VRN: {{ filename }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="slot" value="vrn">
+                                <input type="hidden" name="filename" value="{{ filename }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                    {% for filename in lc_files %}
+                        <li class="data-row">
+                            <span class="data-name">LC/ETC: {{ filename }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="slot" value="lc_etc">
+                                <input type="hidden" name="filename" value="{{ filename }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <div class="empty-state">
+                    <p>No files attached yet for this process.</p>
+                </div>
+            {% endif %}
+        </article>
+    </aside>
+</section>
+
+<script>
+    (function () {
+        const resetFormAfterSubmit = "{{ '1' if reset_form_after_submit else '0' }}" === "1";
+        const form = document.getElementById("merge-remove-dup-form");
+        const vrnUploadRadio = document.getElementById("vrn_source_upload");
+        const vrnImportRadio = document.getElementById("vrn_source_import");
+        const vrnUploadWrap = document.getElementById("vrn_upload_wrap");
+        const vrnImportWrap = document.getElementById("vrn_import_wrap");
+        const vrnFileInput = document.getElementById("vrn_file_input");
+        const vrnImportSelect = document.getElementById("vrn_import_select");
+        const lcUploadRadio = document.getElementById("lc_source_upload");
+        const lcImportRadio = document.getElementById("lc_source_import");
+        const lcUploadWrap = document.getElementById("lc_upload_wrap");
+        const lcImportWrap = document.getElementById("lc_import_wrap");
+        const lcFileInput = document.getElementById("lc_file_input");
+        const lcImportSelect = document.getElementById("lc_import_select");
+
+        function syncVrnSourceUi() {
+            const useImport = vrnImportRadio && vrnImportRadio.checked;
+            if (vrnUploadWrap) vrnUploadWrap.style.display = useImport ? "none" : "";
+            if (vrnImportWrap) vrnImportWrap.style.display = useImport ? "" : "none";
+            if (vrnFileInput) {
+                vrnFileInput.disabled = useImport;
+                if (useImport) vrnFileInput.value = "";
+            }
+            if (vrnImportSelect) vrnImportSelect.disabled = !useImport;
+        }
+
+        function syncLcSourceUi() {
+            const useImport = lcImportRadio && lcImportRadio.checked;
+            if (lcUploadWrap) lcUploadWrap.style.display = useImport ? "none" : "";
+            if (lcImportWrap) lcImportWrap.style.display = useImport ? "" : "none";
+            if (lcFileInput) {
+                lcFileInput.disabled = useImport;
+                if (useImport) lcFileInput.value = "";
+            }
+            if (lcImportSelect) lcImportSelect.disabled = !useImport;
+        }
+
+        if (vrnUploadRadio) vrnUploadRadio.addEventListener("change", syncVrnSourceUi);
+        if (vrnImportRadio) vrnImportRadio.addEventListener("change", syncVrnSourceUi);
+        if (lcUploadRadio) lcUploadRadio.addEventListener("change", syncLcSourceUi);
+        if (lcImportRadio) lcImportRadio.addEventListener("change", syncLcSourceUi);
+
+        if (form) {
+            form.addEventListener("submit", (event) => {
+                const submitter = event.submitter;
+                const action = submitter && submitter.getAttribute("value");
+                if (action !== "upload") return;
+
+                if (vrnImportRadio && vrnImportRadio.checked && vrnImportSelect && !vrnImportSelect.value
+                    && lcImportRadio && lcImportRadio.checked && lcImportSelect && !lcImportSelect.value
+                    && (!vrnFileInput || !vrnFileInput.files.length)
+                    && (!lcFileInput || !lcFileInput.files.length)) {
+                    event.preventDefault();
+                    alert("Select at least one VRN or LC/ETC file to upload or import.");
+                    return;
+                }
+                if (vrnImportRadio && vrnImportRadio.checked && vrnImportSelect && !vrnImportSelect.value
+                    && vrnFileInput && !vrnFileInput.files.length
+                    && (!lcFileInput || !lcFileInput.files.length)
+                    && !(lcImportRadio && lcImportRadio.checked && lcImportSelect && lcImportSelect.value)) {
+                    // allow lc-only update
+                }
+            });
+        }
+
+        syncVrnSourceUi();
+        syncLcSourceUi();
+        if (resetFormAfterSubmit && form) {
+            form.reset();
+            syncVrnSourceUi();
+            syncLcSourceUi();
+        }
+    })();
+</script>
+{% endblock %}

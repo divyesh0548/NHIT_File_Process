@@ -7,7 +7,7 @@
     <div>
         <p class="eyebrow">Process Group</p>
         <h1>Exempt Query</h1>
-        <p>Exempt Query is a separate workflow from {{ merge_valid_lookup_group_label }}. Portal integration for this process is coming soon.</p>
+        <p>Select a sub-process below. Files are stored under <code>File_Process/{{ exempt_query_folder }}/</code>.</p>
     </div>
     <div class="actions" style="margin-top: 0;">
         <a class="btn secondary" href="{{ url_for('home') }}">Back to Home</a>
@@ -16,13 +16,22 @@
 
 <section class="grid cols-2">
     <article class="card">
-        <h3 class="card-title">Run via Scripts</h3>
-        <p>Use the Python pipeline under <code>Exempt Query/python scripts csv/</code>. Place inputs in <code>input/</code> and collect outputs from <code>output/</code>.</p>
-        <p class="muted">See <code>How_to_Run.md</code> in that folder for step-by-step instructions.</p>
+        <h3 class="card-title">{{ merge_normalize_group_label }}</h3>
+        <p>Upload LC/ETC or VRN files, normalize them, and merge into one output file per process.</p>
+        <div class="actions">
+            <a class="btn" href="{{ url_for('merge_normalize') }}">Open</a>
+        </div>
+    </article>
+    <article class="card">
+        <h3 class="card-title">{{ merge_remove_dup_group_label }}</h3>
+        <p>Import or upload VRN and LC/ETC outputs, merge them, and remove duplicates into <code>semi-final-output.csv</code>.</p>
+        <div class="actions">
+            <a class="btn" href="{{ url_for('merge_remove_duplicate') }}">Open</a>
+        </div>
     </article>
     <article class="card">
         <h3 class="card-title">Browse Folders</h3>
-        <p>Process folders for Exempt Query will be stored under <code>File_Process/{{ exempt_query_folder }}/</code>.</p>
+        <p>Open the Exempt Query tree, including <code>{{ merge_normalize_folder }}</code> and <code>{{ merge_remove_dup_folder }}</code>.</p>
         <div class="actions">
             <a class="btn secondary" href="{{ url_for('file_process_directories', path=exempt_query_folder) }}">Open in Directory Browser</a>
         </div>

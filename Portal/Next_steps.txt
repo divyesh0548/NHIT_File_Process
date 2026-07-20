@@ -1,1 +1,3 @@
 Keyword lists are identified. Now give prompt to store them in a config file so that they can be managed easily.
+
+Compare the final output of faster version of merge+Normalize program.

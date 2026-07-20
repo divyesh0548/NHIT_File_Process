@@ -1,0 +1,25 @@
+I agree with many of your suggestions. 
+Here is the list of things I want you to implement.
+
+1. Rename the orchoestrator file to "orchoestrator_final.py"
+
+2. implement a way to detect LT_pass file and rows in it. If no LT file or empty file will not let the program "Date_validity_check_LT.py". This "Date_validity_check.py" program will always run because MP Pass file will be available all the time. If MP Pass file not found then stop the rest of the process and display error.
+
+3. Please explain you third point in details. Multi-month pass. Because currently I merge the VRN and ETC files of all months and run this whole "Excempt Query". Please explain how date ranges will make a vehicle valid. Date will also include month, so what is the problem? It will not make a vehicle valid if month is different.
+
+4. Stop the execution if pass type column is not found or no MP rows.
+
+5. Just generate other type of pass rows in seperate file, there is no need of that. (Just for debugging)
+
+6. Yes, Force the Plaza Selection
+
+7. This is just a input file wiring for return journey script. If LT pass was not available then MP output fill will be generated. So just pass the output file path into this.
+
+8. No need to display steps, and keep intermediate files into work folder and pass their path to next scripts.
+
+10. Okay do not run useless files.
+
+
+Tell me if this is okay or not?
+
+Also explain how will you pass file paths during execution?

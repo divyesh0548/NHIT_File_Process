@@ -3,6 +3,34 @@
 {% block title %}File_Process Directories{% endblock %}
 
 {% block content %}
+<style>
+    .directory-location-card {
+        display: inline-block;
+        width: fit-content;
+        max-width: 100%;
+        padding: 12px 14px;
+        margin-bottom: 22px;
+    }
+    .directory-location-card .path-chip {
+        border-radius: 4px;
+    }
+    .directory-browser-card .section-head {
+        align-items: center;
+        margin-bottom: 0;
+    }
+    .directory-browser-card .section-title-row {
+        align-items: center;
+        min-height: 38px;
+    }
+    .directory-browser-card .section-title-row h2 {
+        margin: 0;
+        line-height: 1.2;
+    }
+    .directory-browser-card .icon-btn {
+        flex-shrink: 0;
+        line-height: 1;
+    }
+</style>
 <section class="page-header">
     <div>
         <p class="eyebrow">Directory Browser</p>
@@ -11,9 +39,8 @@
     </div>
 </section>
 
-<article class="card" style="margin-bottom: 22px;">
-    <p class="eyebrow">Current Location</p>
-    <h2>Directory path</h2>
+<article class="card directory-location-card">
+    <p class="eyebrow" style="margin-bottom: 8px;">Current Location</p>
     <span class="path-chip">/File_Process{% if current_relative %}/{{ current_relative }}{% endif %}</span>
 </article>
 
@@ -25,16 +52,13 @@
     </div>
 {% endif %}
 
-<article class="list-card">
-    <div class="section-head">
+<article class="list-card directory-browser-card">
+    <div class="section-head mb-4">
         <div class="section-title-row">
             {% if current_relative %}
                 <a class="icon-btn" href="{{ url_for('file_process_directories', path=parent_relative) }}" aria-label="Go up one level">&#8592;</a>
             {% endif %}
-            <div>
             <h2>Directory Contents</h2>
-            <p>Folders open in place. Files can be downloaded or deleted when required.</p>
-            </div>
         </div>
     </div>
     {% if entries %}

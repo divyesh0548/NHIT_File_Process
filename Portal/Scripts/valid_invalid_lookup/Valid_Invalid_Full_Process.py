@@ -16,6 +16,26 @@ if str(PORTAL_ROOT) not in sys.path:
 load_dotenv(REPO_ROOT / ".env")
 
 from Header_Mapping.header_mapping import VALID_INVALID_LOOKUP_HEADER_MAPPING
+from header_matching import normalize_header_match
+
+from valid_invalid_config import (
+    ACCEPTED_STATUS_VALUES,
+    BUS_VEHICLE_CLASSES,
+    CRANE_MOUNTED_VEHICLE_CLASS,
+    DISCOUNT_PASS_JOURNEY_TYPES,
+    HEAVY_SPECIAL_VEHICLE_CLASSES,
+    INVALID_EXCLUDED_VEHICLE_CLASSES,
+    JOURNEY_TYPES_TO_DROP,
+    LIFECYCLE_EXCLUDED_VEHICLE_CLASSES,
+    RATE_SHEET_JOURNEY_COLUMN_RENAMES,
+    STATUS_COLUMN_CANDIDATES,
+    UPDATED_JOURNEY_TYPE_CONT,
+    UPDATED_JOURNEY_TYPE_LOCAL,
+    UPDATED_JOURNEY_TYPE_SINGLE,
+    ZERO_SETTLEMENT_REMOVE_JOURNEY_TYPES,
+    map_npci_to_tc_class,
+    normalize_journey_type,
+)
 
 
 # -----------------------------
@@ -80,7 +100,7 @@ def process_vehicle(lifecycle_input_path):
     engine.dispose()
 
     def normalize_column_name(name):
-        return "".join(ch for ch in str(name).lower() if ch.isalnum())
+        return normalize_header_match(name)
 
     normalized_to_original = {normalize_column_name(col): col for col in df_c.columns}
     required_map = {
@@ -155,48 +175,25 @@ def process_vehicle(lifecycle_input_path):
     if user_renames:
         df_l = df_l.rename(columns=user_renames)
 
-    normalized_columns = {" ".join(col.strip().lower().split()): col for col in df_l.columns}
+    normalized_columns = {normalize_header_match(col): col for col in df_l.columns}
 
     for target, alternatives in rename_map.items():
         if target not in df_l.columns:
             for alt in alternatives:
-                normalized_alt = " ".join(alt.strip().lower().split())
+                normalized_alt = normalize_header_match(alt)
                 if normalized_alt in normalized_columns:
                     df_l = df_l.rename(columns={normalized_columns[normalized_alt]: target})
                     break
 
     if "Journey Type" in df_l.columns:
-        df_l = df_l[
-            ~df_l["Journey Type"].isin(
-                [
-                    "ANNUALPASS",
-                    "ANNUALPASS:LocalSingleC",
-                    "ANNUALPASS:RETURN",
-                    "ANNUALPASS:SINGLE",
-                    "GlobalExempt",
-                    "ANNUALPASS_RETURN",
-                    "ANNUALPASS_FULL",
-                    "Annual Pass Single",
-                    "GlobalExemption",
-                    "Global Exemption",
-                    "Annual Pass Trip",
-                    "0",
-                    "0.0000",
-                    "Rejected Trip",
-                    "Rejected Trip Commercial",
-                    "Annual Pass Trip Personal",
-                    "Rejected Trip Personal",
-                    "EXEMPTED",
-                ]
-            )
-        ]
+        df_l = df_l[~df_l["Journey Type"].isin(JOURNEY_TYPES_TO_DROP)]
 
     status_col = next(
-        (col for col in ["Settlement Type", "Txn Status", "Status", "Transaction Status", "transaction status"] if col in df_l.columns),
+        (col for col in STATUS_COLUMN_CANDIDATES if col in df_l.columns),
         None,
     )
     if status_col:
-        df_l = df_l[df_l[status_col].isin(["ACCEPTED", "Accepted", "SETTLED"])]
+        df_l = df_l[df_l[status_col].isin(ACCEPTED_STATUS_VALUES)]
 
     df_l["Veh Reg No."] = df_l["Veh Reg No."].str.upper().str.strip()
     df_c["Unique Vehicle Number"] = df_c["Unique Vehicle Number"].str.upper().str.strip()
@@ -208,20 +205,7 @@ def process_vehicle(lifecycle_input_path):
         how="left",
     ).drop(columns=["Unique Vehicle Number"])
 
-    df_merged["updated journey type"] = df_merged["Journey Type"].apply(
-        lambda x: "Local Conti/Single"
-        if x in [
-            "Local Cont.",
-            "Local Single",
-            "Local Vehicle(Commercial)",
-            "LocalSingleC",
-            "Local Single Journey Commercial",
-            "Local Vehicle Commercial",
-        ]
-        else "Cont. Journey"
-        if x in ["Return Journey", "RETURN", "RETURN PASS", "Return", "Cont. Journey", "Return Journey Personal"]
-        else "Single Journey"
-    )
+    df_merged["updated journey type"] = df_merged["Journey Type"].apply(normalize_journey_type)
 
     df_final = df_merged[
         (df_merged["Veh Reg No."].str.len() <= 12)
@@ -233,7 +217,7 @@ def process_vehicle(lifecycle_input_path):
 
 
 def rates(df):
-    df = df.rename(columns={"Return Journey": "Cont. Journey", "Local Conti/Local Single": "Local Conti/Single"})
+    df = df.rename(columns=RATE_SHEET_JOURNEY_COLUMN_RENAMES)
     return df.melt(id_vars=["TC Class", "Weight/Capacity", "Vehicle Class"], var_name="Attribute")
 
 
@@ -246,35 +230,32 @@ def get_rate_from_rates(tc_class, journey_type, rates_df):
 
 
 def vehicle_lifecycle(df_result, rates_df):
-    df_result = df_result[~df_result["vehicle class"].isin(["BUS", " BUS", "CAMPER VAN / TRAILER", "CASH VAN", "Error", "MAXI CAB", "MOTOR CAB", "OMNI BUS", "OMNIBUS", "Invalid"])]
+    df_result = df_result[~df_result["vehicle class"].isin(LIFECYCLE_EXCLUDED_VEHICLE_CLASSES)]
 
-    vehicle_classes = {
-        "CONSTRUCTION EQUIPMENT VEHICLE",
-        "EARTH MOVING EQUIPMENT",
-        "VEHICLE FITTED WITH AIR GENERATOR",
-        "VEHICLE FITTED WITH COMPRESSOR",
-        "VEHICLE FITTED WITH RIG",
-        "EXCAVATOR",
-        "TREE TRIMMING VEHICLE",
-        "TOWER WAGONS",
-    }
+    vehicle_classes = set(HEAVY_SPECIAL_VEHICLE_CLASSES)
 
     conditions = [
-        df_result["vehicle class"].isin(vehicle_classes) & (df_result["updated journey type"] == "Single Journey"),
-        df_result["vehicle class"].isin(vehicle_classes) & (df_result["updated journey type"] == "Cont. Journey"),
-        df_result["vehicle class"].isin(vehicle_classes) & (df_result["updated journey type"] == "Local Conti/Single"),
-        (df_result["vehicle class"] == "CRANE MOUNTED VEHICLE") & (df_result["updated journey type"] == "Single Journey"),
-        (df_result["vehicle class"] == "CRANE MOUNTED VEHICLE") & (df_result["updated journey type"] == "Cont. Journey"),
-        (df_result["vehicle class"] == "CRANE MOUNTED VEHICLE") & (df_result["updated journey type"] == "Local Conti/Single"),
+        df_result["vehicle class"].isin(vehicle_classes)
+        & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_SINGLE),
+        df_result["vehicle class"].isin(vehicle_classes)
+        & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_CONT),
+        df_result["vehicle class"].isin(vehicle_classes)
+        & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_LOCAL),
+        (df_result["vehicle class"] == CRANE_MOUNTED_VEHICLE_CLASS)
+        & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_SINGLE),
+        (df_result["vehicle class"] == CRANE_MOUNTED_VEHICLE_CLASS)
+        & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_CONT),
+        (df_result["vehicle class"] == CRANE_MOUNTED_VEHICLE_CLASS)
+        & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_LOCAL),
     ]
 
     values = [
-        get_rate_from_rates("MAV", "Single Journey", rates_df),
-        get_rate_from_rates("MAV", "Cont. Journey", rates_df),
-        get_rate_from_rates("MAV", "Local Conti/Single", rates_df),
-        get_rate_from_rates("LCV", "Single Journey", rates_df),
-        get_rate_from_rates("LCV", "Cont. Journey", rates_df),
-        get_rate_from_rates("LCV", "Local Conti/Single", rates_df),
+        get_rate_from_rates("MAV", UPDATED_JOURNEY_TYPE_SINGLE, rates_df),
+        get_rate_from_rates("MAV", UPDATED_JOURNEY_TYPE_CONT, rates_df),
+        get_rate_from_rates("MAV", UPDATED_JOURNEY_TYPE_LOCAL, rates_df),
+        get_rate_from_rates("LCV", UPDATED_JOURNEY_TYPE_SINGLE, rates_df),
+        get_rate_from_rates("LCV", UPDATED_JOURNEY_TYPE_CONT, rates_df),
+        get_rate_from_rates("LCV", UPDATED_JOURNEY_TYPE_LOCAL, rates_df),
     ]
 
     df_result["Rate 1"] = np.select(conditions, values, default=None)
@@ -299,7 +280,7 @@ def vehicle_lifecycle(df_result, rates_df):
 
 
 def vehicle_bus(df_result):
-    df_result = df_result[df_result["vehicle class"].isin([" BUS", "BUS", "OMNI BUS", "OMNIBUS"])]
+    df_result = df_result[df_result["vehicle class"].isin(BUS_VEHICLE_CLASSES)]
     df_result = df_result.dropna(subset=["weight"])
 
     def classify_weight(row):
@@ -337,10 +318,10 @@ def get_rate(df, rates_df, is_bus=False):
         "Settled Amount (Rs.)",
         "settled amount",
     ]
-    normalized_df_cols = {" ".join(str(col).strip().lower().split()): col for col in df.columns}
+    normalized_df_cols = {normalize_header_match(col): col for col in df.columns}
     settlement_col = None
     for candidate in settlement_candidates:
-        normalized_candidate = " ".join(candidate.strip().lower().split())
+        normalized_candidate = normalize_header_match(candidate)
         if normalized_candidate in normalized_df_cols:
             settlement_col = normalized_df_cols[normalized_candidate]
             break
@@ -359,27 +340,7 @@ def get_rate(df, rates_df, is_bus=False):
 
 
 def map_npci_to_tc(npci):
-    if npci in [
-        "Car / Jeep / Van",
-        "Car/Jeep/Van",
-        "VC4 - Car / Jeep / Van",
-        "VC4",
-        "Tata Ace and Similar mini Light Commercial Vehicle",
-        "Tata Ace or Similar Mini LCV",
-        "VC20",
-        "VC20 - Tata Ace or similar mini LCV",
-    ]:
-        return "Car"
-    if npci in ["Mini-Bus", "LCV", "Light Commercial vehicle 2-axle", "VC5", "VC9"]:
-        return "LCV"
-    if npci in ["Truck 2 - axle", "Bus 2-axle", "VC10", "VC7", "VC10 - Truck 2 Axle", "VC7 - Bus 2 Axle"]:
-        return "Trk 2 Axle"
-    if npci in ["Truck 3 - axle", "Truck 3-Axle", "VC8", "VC11", "Bus 3-axle", "VC11 - Truck 3 Axle", "VC8 - Bus 3 Axle"]:
-        return "Truck 3 axle"
-    if npci in ["Truck 4 - axle", "Truck 4-Axle", "Truck 5 - axle", "Truck 6 - axle", "VC12", "VC13", "VC14"]:
-        return "MAV"
-    return None
-
+    return map_npci_to_tc_class(npci)
 
 def process_vehicle_classification(df):
     df = df.copy()
@@ -443,27 +404,7 @@ def main():
     df_invalid["Custom.2"] = df_invalid.apply(
         lambda row: "Remove"
         if row["Net Settlement Amt"] == 0
-        and row["Journey Type"]
-        in [
-            "Cont. Journey",
-            "Single Journey",
-            "Local Conti/Single",
-            "Local Cont.",
-            "Local Single",
-            "Return Journey",
-            "SINGLE",
-            "RETURN",
-            "LocalSingleC",
-            "FULL",
-            "LOCAL TRIP",
-            "SINGLE JOURNEY",
-            "RETURN PASS",
-            "Return",
-            "Single",
-            "LocalSingleC",
-            "Local Vehicle(Commercial)",
-            "Local Vehicle Commercial",
-        ]
+        and row["Journey Type"] in ZERO_SETTLEMENT_REMOVE_JOURNEY_TYPES
         else "Keep",
         axis=1,
     )
@@ -471,22 +412,7 @@ def main():
     df_invalid.drop(columns=["Custom.2"], inplace=True)
 
     def update_net_settlement(row):
-        if row["Journey Type"] in [
-            "DISCOUNTED",
-            "DISCOUNTMP",
-            "Monthly Pass-50 trips",
-            "Monthly Pass Comm",
-            "Monthly Pass Non Comm",
-            "Local Non Commercial",
-            "Local20KM",
-            "MonthlyExempted",
-            "Discount Pass",
-            "Monthly Pass",
-            "Local Vehicle(Commercial)",
-            "Local Pass Non Comm",
-            "NON_FIN",
-            "Monthly Pass 20 Km",
-        ]:
+        if row["Journey Type"] in DISCOUNT_PASS_JOURNEY_TYPES:
             tc_class = map_npci_to_tc(row["NPCI Class Desc"])
             if tc_class and tc_class in rate_lookup:
                 return rate_lookup[tc_class]
@@ -497,17 +423,8 @@ def main():
     df_invalid["Impact"] = df_invalid["Rate"] - df_invalid["updated net settlement amount"]
     df_invalid = df_invalid[(df_invalid["Impact"] != 0) & (df_invalid["Impact"] > 0)]
 
-    exclude_classes = [
-        "BUS",
-        "CONSTRUCTION EQUIPMENT VEHICLE",
-        "OMNI BUS",
-        "TOWER WAGONS",
-        "VEHICLE FITTED WITH AIR GENERATOR",
-        "VEHICLE FITTED WITH COMPRESSOR",
-        "VEHICLE FITTED WITH RIG",
-    ]
     df_invalid = df_invalid[
-        ~df_invalid["vehicle class"].fillna("").str.strip().str.upper().isin(exclude_classes)
+        ~df_invalid["vehicle class"].fillna("").str.strip().str.upper().isin(INVALID_EXCLUDED_VEHICLE_CLASSES)
     ]
 
     df_valid = df_valid[df_valid["Rate"] != 0]

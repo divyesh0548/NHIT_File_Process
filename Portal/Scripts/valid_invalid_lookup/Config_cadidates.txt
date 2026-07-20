@@ -1,12 +1,18 @@
-1. Journey types to drop - Line 168
-2. Status column cadidates - Line 195
-3. Accepted Values cadidates - Line 199
-4. Journey type normalization - Line 211
-5. Journey columns from Rate sheet - Line 236
-6. Excluded vehicle classes from Lifecycle - Line 249
-7. Bus vehicle classes for processing them differently (In function "vehicle_lifecycle" bus classes plus other keywords are used to configure them seperately) - Line 302
-8. Heavy/Special classes - Line 251
-9. vehicle classes normalization list - Line 362
-10. Distinct values of journey type columns - Line 444
-11. Journey Type values for Discounted/Pass journeys - Line 474
-12. Invalid exlcuded classes - Line 500
+# Config lists for Valid/Invalid Lookup live in:
+#   valid_invalid_config.py  (edit that file to update lists/mappings)
+#
+# Mapping to Code candidates (moved into valid_invalid_config.py):
+# 1. Journey types to drop ................. JOURNEY_TYPES_TO_DROP
+# 2. Status column candidates .............. STATUS_COLUMN_CANDIDATES
+# 3. Accepted status values ................ ACCEPTED_STATUS_VALUES
+# 4. Journey type normalization ............ LOCAL_CONTI_SINGLE_JOURNEY_TYPES,
+#                                            CONT_JOURNEY_TYPES, normalize_journey_type()
+# 5. Journey columns from Rate sheet ....... RATE_SHEET_JOURNEY_COLUMN_RENAMES
+# 6. Excluded vehicle classes (lifecycle) .. LIFECYCLE_EXCLUDED_VEHICLE_CLASSES
+# 7. Bus vehicle classes ................... BUS_VEHICLE_CLASSES
+# 8. Heavy/Special classes ................. HEAVY_SPECIAL_VEHICLE_CLASSES,
+#                                            CRANE_MOUNTED_VEHICLE_CLASS
+# 9. NPCI → TC class mapping ............... NPCI_TO_TC_CLASS, map_npci_to_tc_class()
+# 10. Zero-settlement journey types ........ ZERO_SETTLEMENT_REMOVE_JOURNEY_TYPES
+# 11. Discount/Pass journey types .......... DISCOUNT_PASS_JOURNEY_TYPES
+# 12. Invalid excluded classes ............. INVALID_EXCLUDED_VEHICLE_CLASSES

@@ -1,5 +1,7 @@
 import csv
+import json
 import os
+import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,28 +16,24 @@ from win32com.client import DispatchEx
 from merge_files import merge_files_in_folder
 
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_FOLDER = BASE_DIR / "Daroda_lc_vrn_files/vrn"
-MERGE_OUTPUT_FILE = BASE_DIR / "normalized_and_merged_vrn_daroda.csv"
+PORTAL_ROOT = BASE_DIR.parents[1]
+_DEFAULT_INPUT_FOLDER = BASE_DIR / "Daroda_lc_vrn_files/vrn"
+_DEFAULT_MERGE_OUTPUT_FILE = BASE_DIR / "normalized_and_merged_vrn_daroda.csv"
+
+# Portal sets these env vars when running from Exempt Query → Merge + Normalize.
+INPUT_FOLDER = Path(
+    os.environ.get("MERGE_NORMALIZE_INPUT_FOLDER", str(_DEFAULT_INPUT_FOLDER))
+).resolve()
+MERGE_OUTPUT_FILE = Path(
+    os.environ.get("MERGE_NORMALIZE_OUTPUT_FILE", str(_DEFAULT_MERGE_OUTPUT_FILE))
+).resolve()
 
 MERGE_AFTER_NORMALIZATION = True
 # Each .xlsx is fully loaded by openpyxl; parallel workers multiply peak RAM (workers × workbook size).
 MAX_WORKER_THREADS = 5
 # Before normalization: try csv_converter.convert_workbook on each .xlsx/.xls; on success
 # delete the workbook and keep the new .csv. Failures keep the original for default handling.
-
-MERGE_HEADER_KEYWORDS = [
-    "MVC_TLC_CLASS",
-    "CCH TXN NO",
-    "AVC",
-    "TRANSACTION NO",
-    "MVC",
-    "VEH CLASS",
-    "TC CLASS",
-    "Veh Class",
-    "OperatorClass",
-    "TcClass",
-    "Operator Class",
-]
+MIN_MERGE_HEADER_KEYWORDS = 3
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 TRACKED_HEADER_COLUMNS = {
@@ -673,6 +671,40 @@ def normalize_csv_file_fast(file_path: Path, normalization_lookup):
     return total_changes
 
 
+def get_merge_header_keywords() -> List[str]:
+    """
+    LC/ETC/VRN header keywords from nhit_file_process (same source as Life_cycle_merge.py).
+    Used for workbook→CSV conversion and merge_files_in_folder header detection.
+    Portal passes MERGE_NORMALIZE_HEADER_KEYWORDS (JSON) so the subprocess does not
+    need a separate DB round-trip.
+    """
+    raw = os.environ.get("MERGE_NORMALIZE_HEADER_KEYWORDS", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                keywords = [str(k).strip() for k in parsed if str(k).strip()]
+                if len(keywords) >= MIN_MERGE_HEADER_KEYWORDS:
+                    return keywords
+        except json.JSONDecodeError:
+            pass
+
+    portal_root = str(PORTAL_ROOT)
+    if portal_root not in sys.path:
+        sys.path.insert(0, portal_root)
+
+    from db.nhit_file_process import get_lc_etc_header_keyword_strings
+
+    keywords = get_lc_etc_header_keyword_strings()
+    if len(keywords) < MIN_MERGE_HEADER_KEYWORDS:
+        raise RuntimeError(
+            f"Need at least {MIN_MERGE_HEADER_KEYWORDS} LC/ETC/VRN header keywords in "
+            f"nhit_file_process; found {len(keywords)}. "
+            "Configure them from Merge + Normalize → Header Keywords."
+        )
+    return keywords
+
+
 def find_input_files(folder_path: Path):
     return sorted(
         p
@@ -688,9 +720,7 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
     """
     try:
         from csv_converter import (
-            HEADER_KEYWORDS as _csv_header_keywords,
             HEADER_SCAN_MAX_ROW as _csv_scan_max_row,
-            MIN_HEADER_KEYWORD_MATCHES as _csv_min_matches,
             convert_workbook,
         )
     except ImportError as exc:
@@ -701,14 +731,17 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
         )
         return
 
-    keywords = list(_csv_header_keywords)
-    if len(keywords) < _csv_min_matches:
+    try:
+        keywords = get_merge_header_keywords()
+    except Exception as exc:
         print(
-            f"[WARN] csv_converter needs at least {_csv_min_matches} HEADER_KEYWORDS; "
-            f"have {len(keywords)}. Skipping pre-conversion to CSV.",
+            f"[WARN] Could not load LC/ETC/VRN header keywords ({exc}); "
+            "skipping pre-conversion to CSV.",
             flush=True,
         )
         return
+
+    conv_min_matches = min(MIN_MERGE_HEADER_KEYWORDS, len(keywords))
 
     folder_path = folder_path.resolve()
     if not folder_path.is_dir():
@@ -727,7 +760,7 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
 
     print(
         f"\n[PHASE 1] csv_converter: trying {len(targets)} workbook(s) → .csv "
-        f"(header scan rows 1-{_csv_scan_max_row}, min matches={_csv_min_matches}; "
+        f"(header scan rows 1-{_csv_scan_max_row}, min matches={conv_min_matches}; "
         f"delete source on success)…",
         flush=True,
     )
@@ -738,7 +771,12 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
                 f"[PHASE 1][START] {path.name}: detecting header + converting...",
                 flush=True,
             )
-            convert_workbook(path, keywords, None)
+            convert_workbook(
+                path,
+                keywords,
+                None,
+                min_keyword_matches=conv_min_matches,
+            )
             path.unlink()
             print(
                 f"[PHASE 1][DONE] {path.name}: converted to {out_csv.name}",
@@ -755,10 +793,16 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
 
 def merge_normalized_files():
     print(f"\n[MERGE] Starting merge from {INPUT_FOLDER}")
+    header_keywords = get_merge_header_keywords()
+    print(
+        f"[MERGE] Using {len(header_keywords)} LC/ETC/VRN header keyword(s) from database.",
+        flush=True,
+    )
+    MERGE_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     merge_files_in_folder(
         str(INPUT_FOLDER),
         str(MERGE_OUTPUT_FILE),
-        MERGE_HEADER_KEYWORDS,
+        header_keywords,
     )
 
 
@@ -780,6 +824,11 @@ def process_file(file_path: Path, normalization_lookup):
 def main():
     start_time = time.perf_counter()
     normalization_lookup = build_lookup(NORMALIZATION_GROUPS)
+
+    INPUT_FOLDER.mkdir(parents=True, exist_ok=True)
+    MERGE_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Input folder: {INPUT_FOLDER}", flush=True)
+    print(f"Merge output: {MERGE_OUTPUT_FILE}", flush=True)
 
     phase_convert_workbooks_to_csv_and_delete(INPUT_FOLDER)
 

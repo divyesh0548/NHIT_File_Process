@@ -1,11 +1,20 @@
+"""
+Phase 1 now converts .xlsx / .xls directly into a normalized .csv in the same pass.
+Phase 2 runs concurrently on all .csv files in the folder.
+
+after that, merge_normalized_files() is the same as before.
+"""
+
 import csv
+import json
 import os
+import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import pythoncom
 from openpyxl import load_workbook
@@ -14,28 +23,23 @@ from win32com.client import DispatchEx
 from merge_files import merge_files_in_folder
 
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_FOLDER = BASE_DIR / "Daroda_lc_vrn_files/vrn"
-MERGE_OUTPUT_FILE = BASE_DIR / "normalized_and_merged_vrn_daroda.csv"
+PORTAL_ROOT = BASE_DIR.parents[1]
+_DEFAULT_INPUT_FOLDER = BASE_DIR / "Daroda_lc_vrn_files/vrn"
+_DEFAULT_MERGE_OUTPUT_FILE = BASE_DIR / "normalized_and_merged_vrn_daroda.csv"
+
+# Portal sets these env vars when running from Exempt Query → Merge + Normalize.
+INPUT_FOLDER = Path(
+    os.environ.get("MERGE_NORMALIZE_INPUT_FOLDER", str(_DEFAULT_INPUT_FOLDER))
+).resolve()
+MERGE_OUTPUT_FILE = Path(
+    os.environ.get("MERGE_NORMALIZE_OUTPUT_FILE", str(_DEFAULT_MERGE_OUTPUT_FILE))
+).resolve()
 
 MERGE_AFTER_NORMALIZATION = True
-# Each .xlsx is fully loaded by openpyxl; parallel workers multiply peak RAM (workers × workbook size).
 MAX_WORKER_THREADS = 5
-# Before normalization: try csv_converter.convert_workbook on each .xlsx/.xls; on success
-# delete the workbook and keep the new .csv. Failures keep the original for default handling.
-
-MERGE_HEADER_KEYWORDS = [
-    "MVC_TLC_CLASS",
-    "CCH TXN NO",
-    "AVC",
-    "TRANSACTION NO",
-    "MVC",
-    "VEH CLASS",
-    "TC CLASS",
-    "Veh Class",
-    "OperatorClass",
-    "TcClass",
-    "Operator Class",
-]
+MIN_MERGE_HEADER_KEYWORDS = 3
+XLSX_STREAM_MAX_ROWS = 1_048_576
+XLSX_STREAM_TAIL_EMPTY_ROWS = 200
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 TRACKED_HEADER_COLUMNS = {
@@ -284,7 +288,6 @@ def _excel_serial_to_datetime(serial: float) -> datetime:
 
 
 def parse_datetime_cell(value) -> Optional[datetime]:
-    """Parse a cell value to datetime (Power BI datetime / text / Excel serial)."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -322,7 +325,6 @@ def parse_datetime_cell(value) -> Optional[datetime]:
 
 
 def coerce_datetime_value(value) -> Optional[datetime]:
-    """Power Query Changed Type to datetime: normalize parseable non-datetime cells."""
     if isinstance(value, datetime):
         return None
     return parse_datetime_cell(value)
@@ -504,7 +506,7 @@ def normalize_xls_file(file_path: Path, normalization_lookup) -> int:
         try:
             excel.Calculation = -4135
         except Exception:
-            pass  # manual calculation
+            pass
 
         workbook = excel.Workbooks.Open(str(file_path))
 
@@ -673,6 +675,34 @@ def normalize_csv_file_fast(file_path: Path, normalization_lookup):
     return total_changes
 
 
+def get_merge_header_keywords() -> List[str]:
+    raw = os.environ.get("MERGE_NORMALIZE_HEADER_KEYWORDS", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                keywords = [str(k).strip() for k in parsed if str(k).strip()]
+                if len(keywords) >= MIN_MERGE_HEADER_KEYWORDS:
+                    return keywords
+        except json.JSONDecodeError:
+            pass
+
+    portal_root = str(PORTAL_ROOT)
+    if portal_root not in sys.path:
+        sys.path.insert(0, portal_root)
+
+    from db.nhit_file_process import get_lc_etc_header_keyword_strings
+
+    keywords = get_lc_etc_header_keyword_strings()
+    if len(keywords) < MIN_MERGE_HEADER_KEYWORDS:
+        raise RuntimeError(
+            f"Need at least {MIN_MERGE_HEADER_KEYWORDS} LC/ETC/VRN header keywords in "
+            f"nhit_file_process; found {len(keywords)}. "
+            "Configure them from Merge + Normalize → Header Keywords."
+        )
+    return keywords
+
+
 def find_input_files(folder_path: Path):
     return sorted(
         p
@@ -681,38 +711,328 @@ def find_input_files(folder_path: Path):
     )
 
 
-def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
-    """
-    Use csv_converter on each .xlsx/.xls in folder. On success, remove the workbook
-    so phase 2 only normalizes CSV where conversion worked; failures keep originals.
-    """
-    try:
-        from csv_converter import (
-            HEADER_KEYWORDS as _csv_header_keywords,
-            HEADER_SCAN_MAX_ROW as _csv_scan_max_row,
-            MIN_HEADER_KEYWORD_MATCHES as _csv_min_matches,
-            convert_workbook,
+def _normalize_and_filter_row_for_csv(
+    row_values,
+    normalization_lookup,
+    header_columns: Dict[int, str],
+):
+    updates, drop_row = process_row_values(
+        row_values,
+        normalization_lookup,
+        header_columns,
+    )
+    row_out = list(row_values)
+    changes = 0
+
+    for col_idx, replacement in updates:
+        if col_idx <= len(row_out):
+            row_out[col_idx - 1] = replacement
+            changes += 1
+
+    if drop_row:
+        return None, changes + 1
+
+    file_name_col_idx = next(
+        (idx for idx, name in header_columns.items() if name == "File Name"),
+        None,
+    )
+    if file_name_col_idx is not None and file_name_col_idx <= len(row_out):
+        del row_out[file_name_col_idx - 1]
+        changes += 1
+
+    row_out = ["" if value is None else value for value in row_out]
+    return row_out, changes
+
+
+def _append_normalized_xlsx_rows(
+    writer,
+    ws,
+    first_row_inclusive: int,
+    out_cols: int,
+    normalization_lookup,
+    header_columns: Dict[int, str],
+    sheet_label: str = "",
+) -> Tuple[int, int]:
+    rows_written = 0
+    total_changes = 0
+    tail_empty = 0
+    scan_last = min(first_row_inclusive + XLSX_STREAM_MAX_ROWS - 1, 1_048_576)
+
+    for r_idx, row in enumerate(
+        ws.iter_rows(
+            min_row=1,
+            max_row=scan_last,
+            min_col=1,
+            max_col=out_cols,
+            values_only=True,
+        ),
+        start=1,
+    ):
+        if r_idx < first_row_inclusive:
+            continue
+
+        row_values = list(row)[:out_cols]
+        while len(row_values) < out_cols:
+            row_values.append(None)
+
+        has_data = any(normalize_text(c) != "" for c in row_values)
+        if not has_data:
+            tail_empty += 1
+            if tail_empty >= XLSX_STREAM_TAIL_EMPTY_ROWS:
+                break
+        else:
+            tail_empty = 0
+
+        row_out, row_changes = _normalize_and_filter_row_for_csv(
+            row_values,
+            normalization_lookup,
+            header_columns,
         )
+        total_changes += row_changes
+
+        if row_out is None:
+            continue
+
+        writer.writerow(row_out)
+        rows_written += 1
+
+    if sheet_label:
+        print(
+            f"[XLSX][WRITE] {sheet_label}: wrote {rows_written} normalized row(s) "
+            f"from row {first_row_inclusive} onward",
+            flush=True,
+        )
+
+    return rows_written, total_changes
+
+
+def _detect_xls_header(
+    path: Path,
+    keywords: Sequence[str],
+    min_keyword_matches: Optional[int] = None,
+) -> Tuple[int, int]:
+    from csv_converter import detect_header_xls
+
+    return detect_header_xls(path, keywords, min_keyword_matches)
+
+
+def convert_xlsx_to_csv_with_normalization(
+    path: Path,
+    out_path: Path,
+    keywords: Sequence[str],
+    normalization_lookup,
+    min_keyword_matches: Optional[int] = None,
+) -> Tuple[int, int]:
+    from csv_converter import HEADER_SCAN_MAX_ROW, detect_header_row_on_worksheet
+
+    path = path.resolve()
+    out_path = Path(out_path).resolve()
+    min_matches = (
+        min_keyword_matches
+        if min_keyword_matches is not None
+        else MIN_MERGE_HEADER_KEYWORDS
+    )
+
+    sheet_specs: List[Tuple[int, int, int]] = []
+    wb1 = load_workbook(path, read_only=True, data_only=True, keep_links=False)
+    try:
+        for si, ws in enumerate(wb1.worksheets):
+            sheet_name = getattr(ws, "title", f"Sheet{si}")
+            print(
+                f"[XLSX][SCAN] sheet {si} ({sheet_name}): "
+                f"checking rows 1-{HEADER_SCAN_MAX_ROW} for header..."
+            )
+            det = detect_header_row_on_worksheet(ws, keywords, min_matches)
+            if det is None:
+                raise RuntimeError(
+                    f"{path.name}: sheet {si} ({sheet_name!r}): no row in 1–"
+                    f"{HEADER_SCAN_MAX_ROW} matched at least {min_matches} "
+                    "header keyword(s)."
+                )
+            header_row, header_cols, score = det
+            print(
+                f"[XLSX][HEADER] sheet {si} ({sheet_name}): "
+                f"row {header_row}, score={score}, cols={header_cols}"
+            )
+            sheet_specs.append((si, header_row, header_cols))
+    finally:
+        wb1.close()
+
+    out_cols = max(p[2] for p in sheet_specs)
+    rows_written = 0
+    total_changes = 0
+    header_columns: Dict[int, str] = {}
+
+    wb2 = load_workbook(path, read_only=True, data_only=True, keep_links=False)
+    try:
+        with out_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            first_sheet = True
+            for si, header_row, _header_cols in sheet_specs:
+                ws = wb2.worksheets[si]
+                sheet_name = getattr(ws, "title", f"Sheet{si}")
+                start = header_row if first_sheet else header_row + 1
+                mode = "header+data" if first_sheet else "data-only"
+                first_sheet = False
+                print(
+                    f"[XLSX][START] sheet {si} ({sheet_name}): "
+                    f"{mode}, starting row {start}"
+                )
+                written, changes = _append_normalized_xlsx_rows(
+                    writer,
+                    ws,
+                    start,
+                    out_cols,
+                    normalization_lookup,
+                    header_columns,
+                    f"sheet {si} ({sheet_name})",
+                )
+                rows_written += written
+                total_changes += changes
+    finally:
+        wb2.close()
+
+    print(
+        f"[XLSX][DONE] {path.name}: total normalized rows written={rows_written}",
+        flush=True,
+    )
+    return rows_written, total_changes
+
+
+def convert_xls_to_csv_with_normalization(
+    path: Path,
+    out_path: Path,
+    keywords: Sequence[str],
+    normalization_lookup,
+    min_keyword_matches: Optional[int] = None,
+) -> Tuple[int, int]:
+    header_row, header_cols = _detect_xls_header(path, keywords, min_keyword_matches)
+
+    pythoncom.CoInitialize()
+    excel = None
+    workbook = None
+    rows_written = 0
+    total_changes = 0
+    try:
+        excel = DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        workbook = excel.Workbooks.Open(str(path))
+        ws = workbook.Worksheets(1)
+        last_row, last_col = get_last_used_row_col(ws)
+        end_row = last_row if last_row else header_row
+        header_columns: Dict[int, str] = {}
+
+        with out_path.open("w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            for r_idx in range(header_row, end_row + 1):
+                raw = [
+                    ws.Cells(r_idx, c_idx).Text
+                    for c_idx in range(1, max(header_cols, last_col, 1) + 1)
+                ]
+                raw = raw[:header_cols]
+                while len(raw) < header_cols:
+                    raw.append("")
+
+                row_out, row_changes = _normalize_and_filter_row_for_csv(
+                    raw,
+                    normalization_lookup,
+                    header_columns,
+                )
+                total_changes += row_changes
+
+                if row_out is None:
+                    continue
+
+                writer.writerow(row_out)
+                rows_written += 1
+    finally:
+        try:
+            if workbook is not None:
+                workbook.Close(SaveChanges=False)
+        except Exception:
+            pass
+        try:
+            if excel is not None:
+                excel.Quit()
+        except Exception:
+            pass
+        pythoncom.CoUninitialize()
+
+    return rows_written, total_changes
+
+
+def convert_workbook_to_normalized_csv(
+    path: Path,
+    keywords: Sequence[str],
+    normalization_lookup,
+    out_path: Optional[Path] = None,
+    min_keyword_matches: Optional[int] = None,
+) -> Tuple[Path, int, int]:
+    path = path.resolve()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+
+    suffix = path.suffix.lower()
+    if suffix not in (".xlsx", ".xls"):
+        raise ValueError(f"Expected .xlsx or .xls, got {suffix}")
+
+    if out_path is None:
+        out_path = path.with_suffix(".csv")
+    else:
+        out_path = Path(out_path).resolve()
+
+    if suffix == ".xlsx":
+        rows_written, total_changes = convert_xlsx_to_csv_with_normalization(
+            path,
+            out_path,
+            keywords,
+            normalization_lookup,
+            min_keyword_matches,
+        )
+    else:
+        rows_written, total_changes = convert_xls_to_csv_with_normalization(
+            path,
+            out_path,
+            keywords,
+            normalization_lookup,
+            min_keyword_matches,
+        )
+
+    return out_path, rows_written, total_changes
+
+
+def phase_convert_workbooks_to_csv_and_delete(
+    folder_path: Path,
+    normalization_lookup,
+) -> Set[Path]:
+    converted_csvs: Set[Path] = set()
+
+    try:
+        from csv_converter import HEADER_SCAN_MAX_ROW as _csv_scan_max_row
     except ImportError as exc:
         print(
             f"[WARN] Could not import csv_converter ({exc}); "
             "skipping pre-conversion to CSV.",
             flush=True,
         )
-        return
+        return converted_csvs
 
-    keywords = list(_csv_header_keywords)
-    if len(keywords) < _csv_min_matches:
+    try:
+        keywords = get_merge_header_keywords()
+    except Exception as exc:
         print(
-            f"[WARN] csv_converter needs at least {_csv_min_matches} HEADER_KEYWORDS; "
-            f"have {len(keywords)}. Skipping pre-conversion to CSV.",
+            f"[WARN] Could not load LC/ETC/VRN header keywords ({exc}); "
+            "skipping pre-conversion to CSV.",
             flush=True,
         )
-        return
+        return converted_csvs
+
+    conv_min_matches = min(MIN_MERGE_HEADER_KEYWORDS, len(keywords))
 
     folder_path = folder_path.resolve()
     if not folder_path.is_dir():
-        return
+        return converted_csvs
 
     targets = [
         p
@@ -723,11 +1043,11 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
     ]
     if not targets:
         print("[PHASE 1] No .xlsx/.xls files to pre-convert.", flush=True)
-        return
+        return converted_csvs
 
     print(
-        f"\n[PHASE 1] csv_converter: trying {len(targets)} workbook(s) → .csv "
-        f"(header scan rows 1-{_csv_scan_max_row}, min matches={_csv_min_matches}; "
+        f"\n[PHASE 1] workbook(s) → normalized .csv in one pass "
+        f"(header scan rows 1-{_csv_scan_max_row}, min matches={conv_min_matches}; "
         f"delete source on success)…",
         flush=True,
     )
@@ -735,13 +1055,21 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
         out_csv = path.with_suffix(".csv")
         try:
             print(
-                f"[PHASE 1][START] {path.name}: detecting header + converting...",
+                f"[PHASE 1][START] {path.name}: detecting header + converting + normalizing...",
                 flush=True,
             )
-            convert_workbook(path, keywords, None)
+            _, rows_written, total_changes = convert_workbook_to_normalized_csv(
+                path,
+                keywords,
+                normalization_lookup,
+                out_path=out_csv,
+                min_keyword_matches=conv_min_matches,
+            )
             path.unlink()
+            converted_csvs.add(out_csv.resolve())
             print(
-                f"[PHASE 1][DONE] {path.name}: converted to {out_csv.name}",
+                f"[PHASE 1][DONE] {path.name}: converted to {out_csv.name} "
+                f"({rows_written} row(s), {total_changes} change(s))",
                 flush=True,
             )
             print(f"[CONVERT+DEL] {path.name} → {out_csv.name}", flush=True)
@@ -752,13 +1080,21 @@ def phase_convert_workbooks_to_csv_and_delete(folder_path: Path) -> None:
                 flush=True,
             )
 
+    return converted_csvs
+
 
 def merge_normalized_files():
     print(f"\n[MERGE] Starting merge from {INPUT_FOLDER}")
+    header_keywords = get_merge_header_keywords()
+    print(
+        f"[MERGE] Using {len(header_keywords)} LC/ETC/VRN header keyword(s) from database.",
+        flush=True,
+    )
+    MERGE_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     merge_files_in_folder(
         str(INPUT_FOLDER),
         str(MERGE_OUTPUT_FILE),
-        MERGE_HEADER_KEYWORDS,
+        header_keywords,
     )
 
 
@@ -781,9 +1117,20 @@ def main():
     start_time = time.perf_counter()
     normalization_lookup = build_lookup(NORMALIZATION_GROUPS)
 
-    phase_convert_workbooks_to_csv_and_delete(INPUT_FOLDER)
+    INPUT_FOLDER.mkdir(parents=True, exist_ok=True)
+    MERGE_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Input folder: {INPUT_FOLDER}", flush=True)
+    print(f"Merge output: {MERGE_OUTPUT_FILE}", flush=True)
 
-    files = find_input_files(INPUT_FOLDER)
+    converted_csvs = phase_convert_workbooks_to_csv_and_delete(
+        INPUT_FOLDER,
+        normalization_lookup,
+    )
+
+    files = [
+        p for p in find_input_files(INPUT_FOLDER)
+        if p.resolve() not in converted_csvs
+    ]
 
     print(f"\n[PHASE 2] Found {len(files)} file(s) to normalize")
 

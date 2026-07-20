@@ -29,6 +29,12 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 from openpyxl import load_workbook
 
+_PORTAL_ROOT = Path(__file__).resolve().parents[2]
+if str(_PORTAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PORTAL_ROOT))
+
+from header_matching import normalize_header_match
+
 try:
     import pythoncom
     from win32com.client import DispatchEx
@@ -69,6 +75,14 @@ HEADER_SCAN_MAX_ROW = 50
 # read_only xlsx often has max_column=1; always scan at least this many columns.
 HEADER_SCAN_MAX_COL = 512
 MIN_HEADER_KEYWORD_MATCHES = 5
+
+
+def _resolve_min_matches(min_keyword_matches: Optional[int]) -> int:
+    if min_keyword_matches is not None:
+        return max(1, int(min_keyword_matches))
+    return MIN_HEADER_KEYWORD_MATCHES
+
+
 # read_only: random high min_row re-scans from row 1 each time (quadratic). Stream in one
 # forward pass from row 1 with a high max_row cap; skip rows before the detected header.
 XLSX_STREAM_MAX_ROWS = 10_000_000
@@ -76,16 +90,8 @@ XLSX_STREAM_TAIL_EMPTY_ROWS = 100
 
 
 def norm_key(value) -> str:
-    """
-    Normalize for header matching: strip leading/trailing whitespace, casefold,
-    then remove every Unicode whitespace character (including spaces between
-    words and line breaks from pasted Excel text). Same rule applies to
-    HEADER_KEYWORDS when scored.
-    """
-    if value is None:
-        return ""
-    s = str(value).strip().casefold()
-    return "".join(ch for ch in s if not ch.isspace())
+    """Alias for shared header_matching.normalize_header_match."""
+    return normalize_header_match(value)
 
 
 def score_header_row(cell_values: Sequence, keywords: Sequence[str]) -> int:
@@ -140,13 +146,16 @@ def _header_row_better(
 
 
 def detect_header_row_on_worksheet(
-    ws, keywords: Sequence[str]
+    ws,
+    keywords: Sequence[str],
+    min_keyword_matches: Optional[int] = None,
 ) -> Optional[Tuple[int, int, int]]:
     """
     Find the best header row on one worksheet (rows 1–HEADER_SCAN_MAX_ROW only).
 
     Returns (header_row_1based, header_col_count, keyword_score) or None if no row qualifies.
     """
+    min_matches = _resolve_min_matches(min_keyword_matches)
     best_row: Optional[int] = None
     best_score = -1
     best_width = 1
@@ -163,7 +172,7 @@ def detect_header_row_on_worksheet(
     ):
         vals = list(row)
         score = score_header_row(vals, keywords)
-        if score < MIN_HEADER_KEYWORD_MATCHES:
+        if score < min_matches:
             continue
         width = len(trim_trailing_empty(vals))
         if best_row is None or score > best_score or (
@@ -178,13 +187,19 @@ def detect_header_row_on_worksheet(
     return best_row, best_width, best_score
 
 
-def detect_header_xlsx(path: Path, keywords: Sequence[str]) -> Tuple[int, int, int]:
+def detect_header_xlsx(
+    path: Path,
+    keywords: Sequence[str],
+    min_keyword_matches: Optional[int] = None,
+) -> Tuple[int, int, int]:
     """
     Scan first HEADER_SCAN_MAX_ROW rows on every worksheet (max_col capped).
 
     Returns (sheet_index_0based, header_row_1based, header_col_count).
-    Only rows with score >= MIN_HEADER_KEYWORD_MATCHES are candidates.
+    Only rows with score >= min_keyword_matches (default MIN_HEADER_KEYWORD_MATCHES)
+    are candidates.
     """
+    min_matches = _resolve_min_matches(min_keyword_matches)
     wb = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
         best_sheet: Optional[int] = None
@@ -193,7 +208,7 @@ def detect_header_xlsx(path: Path, keywords: Sequence[str]) -> Tuple[int, int, i
         best_width = 1
 
         for sheet_idx, ws in enumerate(wb.worksheets):
-            det = detect_header_row_on_worksheet(ws, keywords)
+            det = detect_header_row_on_worksheet(ws, keywords, min_matches)
             if det is None:
                 continue
             r_idx, width, score = det
@@ -206,7 +221,7 @@ def detect_header_xlsx(path: Path, keywords: Sequence[str]) -> Tuple[int, int, i
         if best_row is None or best_sheet is None:
             raise RuntimeError(
                 f"{path.name}: no row in 1–{HEADER_SCAN_MAX_ROW} on any sheet matched "
-                f"at least {MIN_HEADER_KEYWORD_MATCHES} header keyword(s). "
+                f"at least {min_matches} header keyword(s). "
                 "Adjust HEADER_KEYWORDS or INPUT_FILE."
             )
 
@@ -221,7 +236,7 @@ def _append_xlsx_worksheet_rows(
     first_row_inclusive: int,
     out_cols: int,
     sheet_label: str = "",
-    ) -> int:
+) -> int:
     """
     Append rows from ws starting at first_row_inclusive (1-based) through tail-empty
     stop. One forward read_only pass from row 1 (required by openpyxl read_only).
@@ -268,7 +283,8 @@ def stream_xlsx_all_sheets_to_csv(
     path: Path,
     out_path: Path,
     keywords: Sequence[str],
-    ) -> int:
+    min_keyword_matches: Optional[int] = None,
+) -> int:
     """
     One CSV from all worksheets: detect header on each sheet (rows 1–50), write
     header line once, then all data rows from every sheet in order.
@@ -280,6 +296,7 @@ def stream_xlsx_all_sheets_to_csv(
     """
     path = path.resolve()
     out_path = Path(out_path).resolve()
+    min_matches = _resolve_min_matches(min_keyword_matches)
 
     # read_only: iterating for header detection advances each sheet's stream; open
     # again before streaming so every sheet is read from row 1 once.
@@ -292,12 +309,12 @@ def stream_xlsx_all_sheets_to_csv(
                 f"[XLSX][SCAN] sheet {si} ({sheet_name}): "
                 f"checking rows 1-{HEADER_SCAN_MAX_ROW} for header..."
             )
-            det = detect_header_row_on_worksheet(ws, keywords)
+            det = detect_header_row_on_worksheet(ws, keywords, min_matches)
             if det is None:
                 raise RuntimeError(
                     f"{path.name}: sheet {si} ({getattr(ws, 'title', '?')!r}): "
                     f"no row in 1–{HEADER_SCAN_MAX_ROW} matched at least "
-                    f"{MIN_HEADER_KEYWORD_MATCHES} header keyword(s). "
+                    f"{min_matches} header keyword(s). "
                     "Adjust HEADER_KEYWORDS or sheet layout."
                 )
             header_row, header_cols, score = det
@@ -389,7 +406,12 @@ def read_xls_row_text(ws, r: int, max_col: int) -> List[str]:
     return [ws.Cells(r, c).Text for c in range(1, max_col + 1)]
 
 
-def detect_header_xls(path: Path, keywords: Sequence[str]) -> Tuple[int, int]:
+def detect_header_xls(
+    path: Path,
+    keywords: Sequence[str],
+    min_keyword_matches: Optional[int] = None,
+) -> Tuple[int, int]:
+    min_matches = _resolve_min_matches(min_keyword_matches)
     if not HAS_WIN32:
         raise RuntimeError("pywin32 is required for .xls files. Install with: pip install pywin32")
 
@@ -416,7 +438,7 @@ def detect_header_xls(path: Path, keywords: Sequence[str]) -> Tuple[int, int]:
             while vals and (vals[-1] is None or str(vals[-1]).strip() == ""):
                 vals.pop()
             score = score_header_row(vals, keywords)
-            if score < MIN_HEADER_KEYWORD_MATCHES:
+            if score < min_matches:
                 continue
             width = max(len(vals), 1)
             if best_row is None or score > best_score or (
@@ -429,7 +451,7 @@ def detect_header_xls(path: Path, keywords: Sequence[str]) -> Tuple[int, int]:
         if best_row is None:
             raise RuntimeError(
                 f"{path.name}: no row in 1–{scan_last} matched at least "
-                f"{MIN_HEADER_KEYWORD_MATCHES} header keyword(s). "
+                f"{min_matches} header keyword(s). "
                 "Adjust HEADER_KEYWORDS or INPUT_FILE."
             )
 
@@ -499,6 +521,7 @@ def convert_workbook(
     path: Path,
     keywords: Sequence[str],
     out_path: Optional[Path] = None,
+    min_keyword_matches: Optional[int] = None,
 ) -> Path:
     path = path.resolve()
     if not path.is_file():
@@ -514,9 +537,13 @@ def convert_workbook(
         out_path = Path(out_path).resolve()
 
     if suffix == ".xlsx":
-        n = stream_xlsx_all_sheets_to_csv(path, out_path, keywords)
+        n = stream_xlsx_all_sheets_to_csv(
+            path, out_path, keywords, min_keyword_matches
+        )
     else:
-        header_row, header_cols = detect_header_xls(path, keywords)
+        header_row, header_cols = detect_header_xls(
+            path, keywords, min_keyword_matches
+        )
         n = stream_xls_to_csv(path, out_path, header_row, header_cols)
 
     if suffix == ".xlsx":

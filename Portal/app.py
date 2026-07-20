@@ -23,6 +23,7 @@ from Header_Mapping.header_mapping import (
     VALID_INVALID_LOOKUP_HEADER_MAPPING,
     VALID_INVALID_LOOKUP_REQUIRED_COLUMNS,
 )
+from header_matching import normalize_header_match
 from Scripts.Life_cycle_merge import _detect_header_row_index, merge_files_in_folder
 
 
@@ -38,31 +39,184 @@ ALLOWED_EXTENSIONS = {".xlsx", ".csv", ".xls"}
 FILE_PROCESS_DIR = Path(__file__).resolve().parent / "File_Process"
 
 # Top-level process groups under File_Process/
-MERGE_VALID_LOOKUP_PARENT_FOLDER = "Merge_Valid_Lookup"
+VALID_INVALID_PARENT_FOLDER = "Valid_Invalid_Process"
+LEGACY_VALID_INVALID_PARENT_FOLDER = "Merge_Valid_Lookup"
 EXEMPT_QUERY_PARENT_FOLDER = "Exempt_Query"
 
-# Sub-processes under Merge_Valid_Lookup/
+# Sub-processes under Valid_Invalid_Process/
 LIFE_CYCLE_SUBPROCESS_FOLDER = "Life_Cycle_Merge"
 VALID_INVALID_SUBPROCESS_FOLDER = "Valid_Invalid_Lookup"
+
+# Sub-processes under Exempt_Query/
+MERGE_NORMALIZE_SUBPROCESS_FOLDER = "Merge_&_Normalize"
+MERGE_NORMALIZE_LC_ETC_FOLDER = "LC_ETC"
+MERGE_NORMALIZE_VRN_FOLDER = "VRN"
+MERGE_NORMALIZE_FILE_KINDS = (MERGE_NORMALIZE_LC_ETC_FOLDER, MERGE_NORMALIZE_VRN_FOLDER)
+MERGE_NORMALIZE_FILE_KIND_LABELS = {
+    MERGE_NORMALIZE_LC_ETC_FOLDER: "LC/ETC",
+    MERGE_NORMALIZE_VRN_FOLDER: "VRN",
+}
+HEADER_KEYWORDS_LC_ETC_VRN_LABEL = "LC/ETC/VRN"
+MERGE_NORMALIZE_GROUP_LABEL = "Merge + Normalize"
+MERGE_NORMALIZE_OUTPUT_FILENAME = "normalized_and_merged.csv"
+
+MERGE_REMOVE_DUP_SUBPROCESS_FOLDER = "Merge_&_Remove_Duplicate"
+MERGE_REMOVE_DUP_GROUP_LABEL = "Merge + Remove Duplicate"
+MERGE_REMOVE_DUP_VRN_SLOT = "vrn"
+MERGE_REMOVE_DUP_LC_SLOT = "lc_etc"
+SEMI_FINAL_OUTPUT_FILENAME = "semi-final-output.csv"
+MERGE_REMOVE_DUP_ALLOWED_EXTENSIONS = {".csv"}
 
 # Backward-compatible names used in process state and routing checks
 LIFE_CYCLE_PROCESS_FOLDER = LIFE_CYCLE_SUBPROCESS_FOLDER
 VALID_INVALID_PROCESS_FOLDER = VALID_INVALID_SUBPROCESS_FOLDER
 
-# Display name for the parent process group (distinct from the Valid/Invalid Lookup sub-process)
-MERGE_VALID_LOOKUP_GROUP_LABEL = "Merge + Valid lookup"
+# Display names for the two parent process groups
+VALID_INVALID_GROUP_LABEL = "Valid/Invalid Process"
+EXEMPT_QUERY_GROUP_LABEL = "Exempt Query"
+
+# Backward-compatible aliases used in routes and older template variable names
+MERGE_VALID_LOOKUP_PARENT_FOLDER = VALID_INVALID_PARENT_FOLDER
+MERGE_VALID_LOOKUP_GROUP_LABEL = VALID_INVALID_GROUP_LABEL
 
 VIL_HEADER_MAPPING_FILENAME = "header_mapping.json"
 MIN_LIFE_CYCLE_MERGE_FILES = 2
+MIN_MERGE_NORMALIZE_FILES = 1
+VALID_INVALID_HEADER_SCAN_ROWS = 50
+MIN_LC_ETC_HEADER_KEYWORDS = 3
+PROCESS_STARTED_STATUS_HINT = "Go to Process Management to view status."
 
 FILE_PROCESS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def migrate_valid_invalid_parent_folder():
+    """Rename legacy Merge_Valid_Lookup to Valid_Invalid_Process when safe."""
+    legacy = FILE_PROCESS_DIR / LEGACY_VALID_INVALID_PARENT_FOLDER
+    current = FILE_PROCESS_DIR / VALID_INVALID_PARENT_FOLDER
+    if legacy.is_dir() and not current.is_dir():
+        try:
+            legacy.rename(current)
+        except OSError:
+            pass
+    current.mkdir(parents=True, exist_ok=True)
+    for subprocess in (LIFE_CYCLE_SUBPROCESS_FOLDER, VALID_INVALID_SUBPROCESS_FOLDER):
+        (current / subprocess).mkdir(parents=True, exist_ok=True)
+
+
+migrate_valid_invalid_parent_folder()
 (
-    FILE_PROCESS_DIR / MERGE_VALID_LOOKUP_PARENT_FOLDER / LIFE_CYCLE_SUBPROCESS_FOLDER
+    FILE_PROCESS_DIR
+    / EXEMPT_QUERY_PARENT_FOLDER
+    / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+    / MERGE_NORMALIZE_LC_ETC_FOLDER
 ).mkdir(parents=True, exist_ok=True)
 (
-    FILE_PROCESS_DIR / MERGE_VALID_LOOKUP_PARENT_FOLDER / VALID_INVALID_SUBPROCESS_FOLDER
+    FILE_PROCESS_DIR
+    / EXEMPT_QUERY_PARENT_FOLDER
+    / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+    / MERGE_NORMALIZE_VRN_FOLDER
 ).mkdir(parents=True, exist_ok=True)
-(FILE_PROCESS_DIR / EXEMPT_QUERY_PARENT_FOLDER).mkdir(parents=True, exist_ok=True)
+(
+    FILE_PROCESS_DIR
+    / EXEMPT_QUERY_PARENT_FOLDER
+    / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+).mkdir(parents=True, exist_ok=True)
+
+def valid_invalid_parent_dir():
+    """Resolved Valid/Invalid Process parent folder (prefers new name, falls back to legacy)."""
+    current = FILE_PROCESS_DIR / VALID_INVALID_PARENT_FOLDER
+    if current.is_dir():
+        return current
+    legacy = FILE_PROCESS_DIR / LEGACY_VALID_INVALID_PARENT_FOLDER
+    if legacy.is_dir():
+        return legacy
+    return current
+
+
+def is_valid_invalid_parent_folder(folder_name):
+    return folder_name in (VALID_INVALID_PARENT_FOLDER, LEGACY_VALID_INVALID_PARENT_FOLDER)
+
+
+def get_valid_invalid_process_paths(subprocess_folder, process_name):
+    """Resolve process folders under Valid/Invalid Process (new or legacy parent name)."""
+    safe_subprocess = secure_filename((subprocess_folder or "").strip())
+    safe_process_name = secure_filename((process_name or "").strip())
+    if not safe_subprocess or not safe_process_name:
+        return None, None
+
+    for parent_name in (VALID_INVALID_PARENT_FOLDER, LEGACY_VALID_INVALID_PARENT_FOLDER):
+        process_dir = FILE_PROCESS_DIR / parent_name / safe_subprocess / safe_process_name
+        if process_dir.exists():
+            return process_dir, process_dir / "input"
+
+    process_dir = (
+        FILE_PROCESS_DIR
+        / VALID_INVALID_PARENT_FOLDER
+        / safe_subprocess
+        / safe_process_name
+    )
+    return process_dir, process_dir / "input"
+
+
+def list_available_processes():
+    """All user-created process folders with parent group and sub-process labels."""
+    items = []
+    seen_paths = set()
+
+    def add_item(parent_label, subprocess_label, process_dir):
+        rel = process_dir.relative_to(FILE_PROCESS_DIR.resolve()).as_posix()
+        if rel in seen_paths:
+            return
+        seen_paths.add(rel)
+        items.append(
+            {
+                "parent_label": parent_label,
+                "subprocess_label": subprocess_label,
+                "process_name": process_dir.name,
+                "relative_path": rel,
+            }
+        )
+
+    parent_dir = valid_invalid_parent_dir()
+    for subprocess, subprocess_label in (
+        (LIFE_CYCLE_SUBPROCESS_FOLDER, "Life Cycle Merge"),
+        (VALID_INVALID_SUBPROCESS_FOLDER, "Valid/Invalid Lookup"),
+    ):
+        subprocess_dir = parent_dir / subprocess
+        if subprocess_dir.is_dir():
+            for proc_dir in sorted(subprocess_dir.iterdir(), key=lambda p: p.name.lower()):
+                if proc_dir.is_dir() and not proc_dir.name.startswith("."):
+                    add_item(VALID_INVALID_GROUP_LABEL, subprocess_label, proc_dir)
+
+    exempt_dir = FILE_PROCESS_DIR / EXEMPT_QUERY_PARENT_FOLDER
+    if exempt_dir.is_dir():
+        merge_normalize_root = exempt_dir / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        for kind in MERGE_NORMALIZE_FILE_KINDS:
+            kind_dir = merge_normalize_root / kind
+            if kind_dir.is_dir():
+                kind_label = merge_normalize_file_kind_label(kind)
+                for proc_dir in sorted(kind_dir.iterdir(), key=lambda p: p.name.lower()):
+                    if proc_dir.is_dir() and not proc_dir.name.startswith("."):
+                        add_item(
+                            EXEMPT_QUERY_GROUP_LABEL,
+                            f"{MERGE_NORMALIZE_GROUP_LABEL} ({kind_label})",
+                            proc_dir,
+                        )
+        merge_remove_root = exempt_dir / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        if merge_remove_root.is_dir():
+            for proc_dir in sorted(merge_remove_root.iterdir(), key=lambda p: p.name.lower()):
+                if proc_dir.is_dir() and not proc_dir.name.startswith("."):
+                    add_item(
+                        EXEMPT_QUERY_GROUP_LABEL,
+                        MERGE_REMOVE_DUP_GROUP_LABEL,
+                        proc_dir,
+                    )
+
+    return sorted(
+        items,
+        key=lambda row: (row["parent_label"], row["subprocess_label"], row["process_name"].lower()),
+    )
+
 
 life_cycle_state_lock = threading.Lock()
 life_cycle_state = {
@@ -84,6 +238,288 @@ valid_invalid_state = {
     "last_status": "",
 }
 
+merge_normalize_state_lock = threading.Lock()
+merge_normalize_state = {
+    "running": False,
+    "process_type": MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+    "file_kind": "",
+    "process_name": "",
+    "started_at": None,
+    "finished_at": None,
+    "last_status": "",
+}
+
+merge_remove_dup_state_lock = threading.Lock()
+merge_remove_dup_state = {
+    "running": False,
+    "process_type": MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+    "process_name": "",
+    "started_at": None,
+    "finished_at": None,
+    "last_status": "",
+}
+
+
+def normalize_merge_normalize_file_kind(file_kind):
+    """Map form / legacy folder values to a supported file kind."""
+    kind = (file_kind or "").strip().upper()
+    if kind in ("LC", "LC/ETC"):
+        return MERGE_NORMALIZE_LC_ETC_FOLDER
+    if kind in MERGE_NORMALIZE_FILE_KINDS:
+        return kind
+    return ""
+
+
+def merge_normalize_file_kind_label(file_kind):
+    kind = normalize_merge_normalize_file_kind(file_kind)
+    return MERGE_NORMALIZE_FILE_KIND_LABELS.get(kind, kind or "")
+
+
+def process_started_success_message(title, process_name, detail=""):
+    label = f"{title} ({detail})" if detail else title
+    return (
+        f"{label} started successfully for '{process_name}'. "
+        f"{PROCESS_STARTED_STATUS_HINT}"
+    )
+
+
+def get_merge_normalize_paths(file_kind, process_name):
+    """
+    Resolve Exempt Query Merge + Normalize folders:
+
+    File_Process/Exempt_Query/Merge_&_Normalize/<LC_ETC|VRN>/<process_name>/
+      input/
+      output/
+    """
+    kind = normalize_merge_normalize_file_kind(file_kind)
+    if kind not in MERGE_NORMALIZE_FILE_KINDS:
+        return None, None, None
+    safe_process_name = secure_filename((process_name or "").strip())
+    if not safe_process_name:
+        return None, None, None
+    process_dir = (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        / kind
+        / safe_process_name
+    )
+    return process_dir, process_dir / "input", process_dir / "output"
+
+
+def ensure_merge_normalize_process_dirs(file_kind, process_name):
+    process_dir, input_dir, output_dir = get_merge_normalize_paths(file_kind, process_name)
+    if not process_dir or not input_dir or not output_dir:
+        return None, None, None
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return process_dir, input_dir, output_dir
+
+
+def list_merge_normalize_uploaded_files(file_kind, process_name):
+    _, input_dir, _ = get_merge_normalize_paths(file_kind, process_name)
+    if not input_dir or not input_dir.exists():
+        return []
+    return sorted([p.name for p in input_dir.iterdir() if p.is_file()], key=str.lower)
+
+
+def get_merge_remove_dup_paths(process_name):
+    """
+    File_Process/Exempt_Query/Merge_&_Remove_Duplicate/<process_name>/
+      input/vrn/
+      input/lc_etc/
+      output/
+    """
+    safe_process_name = secure_filename((process_name or "").strip())
+    if not safe_process_name:
+        return None, None, None, None
+    process_dir = (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        / safe_process_name
+    )
+    input_dir = process_dir / "input"
+    return (
+        process_dir,
+        input_dir / MERGE_REMOVE_DUP_VRN_SLOT,
+        input_dir / MERGE_REMOVE_DUP_LC_SLOT,
+        process_dir / "output",
+    )
+
+
+def ensure_merge_remove_dup_dirs(process_name):
+    process_dir, vrn_dir, lc_dir, output_dir = get_merge_remove_dup_paths(process_name)
+    if not process_dir or not vrn_dir or not lc_dir or not output_dir:
+        return None, None, None, None
+    vrn_dir.mkdir(parents=True, exist_ok=True)
+    lc_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return process_dir, vrn_dir, lc_dir, output_dir
+
+
+def allowed_merge_remove_dup_file(filename):
+    return Path(filename).suffix.lower() in MERGE_REMOVE_DUP_ALLOWED_EXTENSIONS
+
+
+def list_merge_remove_dup_slot_files(process_name, slot=MERGE_REMOVE_DUP_VRN_SLOT):
+    _, vrn_dir, lc_dir, _ = get_merge_remove_dup_paths(process_name)
+    slot_dir = vrn_dir if slot == MERGE_REMOVE_DUP_VRN_SLOT else lc_dir
+    if not slot_dir or not slot_dir.exists():
+        return []
+    return sorted([p.name for p in slot_dir.iterdir() if p.is_file()], key=str.lower)
+
+
+def get_merge_remove_dup_slot_file(process_name, slot):
+    _, vrn_dir, lc_dir, _ = get_merge_remove_dup_paths(process_name)
+    slot_dir = vrn_dir if slot == MERGE_REMOVE_DUP_VRN_SLOT else lc_dir
+    if not slot_dir or not slot_dir.exists():
+        return None
+    files = sorted([p for p in slot_dir.iterdir() if p.is_file()], key=lambda p: p.name.lower())
+    return files[0] if files else None
+
+
+def clear_merge_remove_dup_slot(process_name, slot):
+    _, vrn_dir, lc_dir, _ = get_merge_remove_dup_paths(process_name)
+    slot_dir = vrn_dir if slot == MERGE_REMOVE_DUP_VRN_SLOT else lc_dir
+    if not slot_dir or not slot_dir.exists():
+        return
+    for item in slot_dir.iterdir():
+        if item.is_file():
+            item.unlink()
+
+
+def copy_to_merge_remove_dup_slot(process_name, slot, source_path):
+    process_dir, vrn_dir, lc_dir, _ = ensure_merge_remove_dup_dirs(process_name)
+    if not process_dir:
+        return None
+    slot_dir = vrn_dir if slot == MERGE_REMOVE_DUP_VRN_SLOT else lc_dir
+    clear_merge_remove_dup_slot(process_name, slot)
+    destination = slot_dir / secure_filename(Path(source_path).name)
+    shutil.copy2(source_path, destination)
+    return destination
+
+
+def list_merge_normalize_output_files(file_kind=None):
+    """CSV outputs from Merge + Normalize (VRN and/or LC/ETC)."""
+    root = FILE_PROCESS_DIR / EXEMPT_QUERY_PARENT_FOLDER / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+    if not root.exists():
+        return []
+    kinds = [normalize_merge_normalize_file_kind(file_kind)] if file_kind else list(MERGE_NORMALIZE_FILE_KINDS)
+    results = []
+    for kind in kinds:
+        if not kind:
+            continue
+        kind_dir = root / kind
+        if not kind_dir.is_dir():
+            continue
+        for proc_dir in sorted(kind_dir.iterdir(), key=lambda p: p.name.lower()):
+            if not proc_dir.is_dir():
+                continue
+            out_file = proc_dir / "output" / MERGE_NORMALIZE_OUTPUT_FILENAME
+            if not out_file.is_file():
+                continue
+            rel = out_file.relative_to(FILE_PROCESS_DIR.resolve()).as_posix()
+            results.append(
+                {
+                    "relative_path": rel,
+                    "label": (
+                        f"{MERGE_NORMALIZE_FILE_KIND_LABELS[kind]} / {proc_dir.name} / "
+                        f"output / {out_file.name}"
+                    ),
+                    "process_name": proc_dir.name,
+                    "file_kind": kind,
+                    "filename": out_file.name,
+                }
+            )
+    return results
+
+
+def resolve_merge_normalize_output_import(relative_path, expected_kind):
+    """Allow only Merge + Normalize output CSV for the expected VRN or LC/ETC kind."""
+    target = safe_path_from_relative(relative_path)
+    if target is None or not target.is_file():
+        return None
+    if target.name != MERGE_NORMALIZE_OUTPUT_FILENAME:
+        return None
+    if not allowed_merge_remove_dup_file(target.name):
+        return None
+    try:
+        rel_parts = target.relative_to(FILE_PROCESS_DIR.resolve()).parts
+    except ValueError:
+        return None
+    kind = normalize_merge_normalize_file_kind(expected_kind)
+    if (
+        len(rel_parts) < 6
+        or rel_parts[0] != EXEMPT_QUERY_PARENT_FOLDER
+        or rel_parts[1] != MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        or rel_parts[2] != kind
+        or rel_parts[4] != "output"
+    ):
+        return None
+    return target
+
+
+def parse_input_folder_context(input_path):
+    """
+    Derive process metadata from an .../input folder.
+
+    Supports:
+      <parent>/<subprocess>/<process>/input
+      Exempt_Query/Merge_&_Normalize/<LC_ETC|VRN>/<process>/input
+    """
+    input_path = Path(input_path).resolve()
+    if input_path.name != "input":
+        return None
+    try:
+        parts = input_path.relative_to(FILE_PROCESS_DIR.resolve()).parts
+    except ValueError:
+        return None
+
+    if (
+        len(parts) >= 5
+        and parts[0] == EXEMPT_QUERY_PARENT_FOLDER
+        and parts[1] == MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        and parts[-1] == "input"
+    ):
+        file_kind = normalize_merge_normalize_file_kind(parts[2])
+        if not file_kind:
+            return None
+        return {
+            "parent_folder": parts[0],
+            "subprocess_folder": parts[1],
+            "file_kind": file_kind,
+            "process_name": parts[3],
+            "process_type": parts[1],
+            "process_dir": input_path.parent,
+        }
+
+    if (
+        len(parts) >= 4
+        and parts[0] == EXEMPT_QUERY_PARENT_FOLDER
+        and parts[1] == MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        and parts[-1] == "input"
+    ):
+        return {
+            "parent_folder": parts[0],
+            "subprocess_folder": parts[1],
+            "file_kind": None,
+            "process_name": parts[2],
+            "process_type": parts[1],
+            "process_dir": input_path.parent,
+        }
+
+    if len(parts) >= 4 and parts[-1] == "input":
+        return {
+            "parent_folder": parts[0],
+            "subprocess_folder": parts[1],
+            "file_kind": None,
+            "process_name": parts[2],
+            "process_type": parts[1],
+            "process_dir": input_path.parent,
+        }
+    return None
+
 
 def allowed_file(filename):
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
@@ -101,21 +537,90 @@ def get_process_input_dir(parent_folder, subprocess_folder, process_name):
 
 
 def list_uploaded_files(parent_folder, subprocess_folder, process_name):
-    _, input_dir = get_process_input_dir(parent_folder, subprocess_folder, process_name)
+    if is_valid_invalid_parent_folder(parent_folder):
+        _, input_dir = get_valid_invalid_process_paths(subprocess_folder, process_name)
+    else:
+        _, input_dir = get_process_input_dir(parent_folder, subprocess_folder, process_name)
     if not input_dir or not input_dir.exists():
         return []
     return sorted([p.name for p in input_dir.iterdir() if p.is_file()], key=str.lower)
 
 
 def get_valid_invalid_paths(process_name):
-    process_dir, input_dir = get_process_input_dir(
-        MERGE_VALID_LOOKUP_PARENT_FOLDER,
+    """
+    Resolve Valid/Invalid Lookup process folders:
+
+    File_Process/Valid_Invalid_Process/Valid_Invalid_Lookup/<process_name>/
+      input/   — confirmed merged life cycle file
+      rate/    — rates file (sibling of input, not nested under it)
+      output/  — valid_table.csv / invalid_table.csv
+      .stage/  — temporary staged merge before Confirm
+    """
+    process_dir, input_dir = get_valid_invalid_process_paths(
         VALID_INVALID_SUBPROCESS_FOLDER,
         process_name,
     )
     if not process_dir or not input_dir:
         return None, None, None
-    rate_dir = input_dir / "rate"
+    rate_dir = process_dir / "rate"
+    return process_dir, input_dir, rate_dir
+
+
+RESERVED_PROCESS_NAMES = {
+    VALID_INVALID_PARENT_FOLDER.lower(),
+    LEGACY_VALID_INVALID_PARENT_FOLDER.lower(),
+    LIFE_CYCLE_SUBPROCESS_FOLDER.lower(),
+    VALID_INVALID_SUBPROCESS_FOLDER.lower(),
+    EXEMPT_QUERY_PARENT_FOLDER.lower(),
+    MERGE_NORMALIZE_SUBPROCESS_FOLDER.lower(),
+    "merge__normalize",
+    "merge_and_normalize",
+    MERGE_REMOVE_DUP_SUBPROCESS_FOLDER.lower(),
+    "merge__remove_duplicate",
+    "merge_and_remove_duplicate",
+    MERGE_NORMALIZE_LC_ETC_FOLDER.lower(),
+    MERGE_REMOVE_DUP_LC_SLOT.lower(),
+    "lc",
+    "lc/etc",
+    MERGE_NORMALIZE_VRN_FOLDER.lower(),
+    MERGE_REMOVE_DUP_VRN_SLOT.lower(),
+    "input",
+    "output",
+    "rate",
+    "file_process",
+}
+
+
+def is_reserved_process_name(process_name):
+    safe_name = secure_filename((process_name or "").strip())
+    return not safe_name or safe_name.lower() in RESERVED_PROCESS_NAMES
+
+
+def ensure_valid_invalid_process_dirs(process_name):
+    """Create the standard VIL folder layout; migrate legacy input/rate → rate/."""
+    process_dir, input_dir, rate_dir = get_valid_invalid_paths(process_name)
+    if not process_dir or not input_dir or not rate_dir:
+        return None, None, None
+
+    input_dir.mkdir(parents=True, exist_ok=True)
+    rate_dir.mkdir(parents=True, exist_ok=True)
+    (process_dir / "output").mkdir(parents=True, exist_ok=True)
+
+    # Older builds nested rates under input/rate — move files up to process/rate.
+    legacy_rate_dir = input_dir / "rate"
+    if legacy_rate_dir.exists() and legacy_rate_dir.is_dir() and legacy_rate_dir.resolve() != rate_dir.resolve():
+        for item in list(legacy_rate_dir.iterdir()):
+            if item.is_file():
+                destination = rate_dir / item.name
+                if destination.exists():
+                    item.unlink()
+                else:
+                    shutil.move(str(item), str(destination))
+        try:
+            legacy_rate_dir.rmdir()
+        except OSError:
+            pass
+
     return process_dir, input_dir, rate_dir
 
 
@@ -130,8 +635,25 @@ def list_file_process_directories():
     return sorted([p.name for p in FILE_PROCESS_DIR.iterdir() if p.is_dir()], key=str.lower)
 
 
+def fetch_lc_etc_header_keywords_or_error(min_required=MIN_LC_ETC_HEADER_KEYWORDS):
+    """Load LC/ETC/VRN header keywords from DB; return (keywords, error_message)."""
+    try:
+        keywords = get_lc_etc_header_keyword_strings()
+    except Exception as exc:
+        return None, (
+            f"Could not load {HEADER_KEYWORDS_LC_ETC_VRN_LABEL} header keywords "
+            f"from database: {exc}"
+        )
+    if len(keywords) < min_required:
+        return None, (
+            f"Configure at least {min_required} header keywords for "
+            f"{HEADER_KEYWORDS_LC_ETC_VRN_LABEL} before running."
+        )
+    return keywords, None
+
+
 def normalize_lookup_column_name(value):
-    return " ".join(str(value).strip().lower().split())
+    return normalize_header_match(value)
 
 
 def inspect_valid_invalid_headers(file_path):
@@ -197,8 +719,8 @@ def inspect_valid_invalid_headers(file_path):
 
 
 def list_life_cycle_merge_output_files():
-    """Files under File_Process/Merge_Valid_Lookup/Life_Cycle_Merge/<process>/output/."""
-    root = FILE_PROCESS_DIR / MERGE_VALID_LOOKUP_PARENT_FOLDER / LIFE_CYCLE_SUBPROCESS_FOLDER
+    """Files under File_Process/Valid_Invalid_Process/Life_Cycle_Merge/<process>/output/."""
+    root = valid_invalid_parent_dir() / LIFE_CYCLE_SUBPROCESS_FOLDER
     if not root.exists():
         return []
     results = []
@@ -236,7 +758,7 @@ def resolve_lcm_output_import_file(relative_path):
     if len(rel_parts) < 5:
         return None
     if (
-        rel_parts[0] != MERGE_VALID_LOOKUP_PARENT_FOLDER
+        not is_valid_invalid_parent_folder(rel_parts[0])
         or rel_parts[1] != LIFE_CYCLE_SUBPROCESS_FOLDER
         or rel_parts[3] != "output"
     ):
@@ -442,11 +964,10 @@ def clear_vil_confirmed_merged_files(process_name):
 
 
 def finalize_vil_staged_merged_file(process_name):
-    process_dir, input_dir, _ = get_valid_invalid_paths(process_name)
+    process_dir, input_dir, _ = ensure_valid_invalid_process_dirs(process_name)
     if not process_dir or not input_dir:
         return False, "Invalid process name."
 
-    input_dir.mkdir(parents=True, exist_ok=True)
     clear_vil_confirmed_merged_files(process_name)
 
     stage_dir = get_valid_invalid_stage_dir(process_name)
@@ -497,27 +1018,24 @@ def list_directory_entries(relative_path):
         process_type = None
         process_name = None
         parent_folder = None
+        file_kind = None
         output_file_count = 0
         if item.is_dir():
             direct_children = list(item.iterdir())
             folder_count = sum(1 for child in direct_children if child.is_dir())
             file_count = sum(1 for child in direct_children if child.is_file())
             if item.name == "input":
-                try:
-                    process_name = item.parent.name
-                    subprocess_folder = item.parent.parent.name
-                    parent_folder = item.parent.parent.parent.name
-                    process_type = subprocess_folder
+                context = parse_input_folder_context(item)
+                if context:
+                    process_name = context["process_name"]
+                    process_type = context["process_type"]
+                    parent_folder = context["parent_folder"]
+                    file_kind = context.get("file_kind")
                     output_dir = item.parent / "output"
                     if output_dir.exists() and output_dir.is_dir():
                         output_file_count = sum(
                             1 for child in output_dir.iterdir() if child.is_file() or child.is_dir()
                         )
-                except Exception:
-                    process_type = None
-                    process_name = None
-                    parent_folder = None
-                    output_file_count = 0
         entries.append(
             {
                 "name": item.name,
@@ -528,6 +1046,7 @@ def list_directory_entries(relative_path):
                 "process_type": process_type,
                 "process_name": process_name,
                 "parent_folder": parent_folder if item.is_dir() and item.name == "input" else None,
+                "file_kind": file_kind if item.is_dir() and item.name == "input" else None,
                 "output_file_count": output_file_count,
             }
         )
@@ -540,6 +1059,11 @@ def annotate_process_button_state(
     life_cycle_process_name,
     valid_invalid_running,
     valid_invalid_process_name,
+    merge_normalize_running=False,
+    merge_normalize_process_name="",
+    merge_normalize_file_kind="",
+    merge_remove_dup_running=False,
+    merge_remove_dup_process_name="",
 ):
     annotated_entries = []
     for entry in entries:
@@ -550,12 +1074,31 @@ def annotate_process_button_state(
             process_type = entry.get("process_type") or ""
             process_name = entry.get("process_name") or ""
             parent_folder = entry.get("parent_folder") or ""
+            file_kind = entry.get("file_kind") or ""
 
-            if parent_folder and parent_folder != MERGE_VALID_LOOKUP_PARENT_FOLDER:
+            supported_groups = {
+                VALID_INVALID_PARENT_FOLDER,
+                LEGACY_VALID_INVALID_PARENT_FOLDER,
+                EXEMPT_QUERY_PARENT_FOLDER,
+            }
+            exempt_subprocesses = {
+                MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+                MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+            }
+            if parent_folder and parent_folder not in supported_groups:
                 process_disabled = True
                 process_disabled_message = (
                     "Processing from the directory browser is only available for "
-                    f"'{MERGE_VALID_LOOKUP_GROUP_LABEL}' sub-processes."
+                    f"'{VALID_INVALID_GROUP_LABEL}' and {EXEMPT_QUERY_GROUP_LABEL} sub-processes."
+                )
+            elif (
+                parent_folder == EXEMPT_QUERY_PARENT_FOLDER
+                and process_type not in exempt_subprocesses
+            ):
+                process_disabled = True
+                process_disabled_message = (
+                    "Processing from the directory browser is only available for "
+                    f"Exempt Query → {MERGE_NORMALIZE_GROUP_LABEL} and {MERGE_REMOVE_DUP_GROUP_LABEL}."
                 )
             elif (
                 life_cycle_running
@@ -575,6 +1118,27 @@ def annotate_process_button_state(
                 process_disabled_message = (
                     "Process is disabled while Valid/Invalid Lookup is already running "
                     f"for '{process_name}'."
+                )
+            elif (
+                merge_normalize_running
+                and process_type == MERGE_NORMALIZE_SUBPROCESS_FOLDER
+                and process_name == merge_normalize_process_name
+                and file_kind == merge_normalize_file_kind
+            ):
+                process_disabled = True
+                process_disabled_message = (
+                    f"Process is disabled while {MERGE_NORMALIZE_GROUP_LABEL} "
+                    f"({merge_normalize_file_kind_label(file_kind)}) is already running for '{process_name}'."
+                )
+            elif (
+                merge_remove_dup_running
+                and process_type == MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+                and process_name == merge_remove_dup_process_name
+            ):
+                process_disabled = True
+                process_disabled_message = (
+                    f"Process is disabled while {MERGE_REMOVE_DUP_GROUP_LABEL} "
+                    f"is already running for '{process_name}'."
                 )
 
         annotated_entry = dict(entry)
@@ -601,8 +1165,7 @@ def file_process_download():
 
 
 def process_life_cycle_files(process_name):
-    process_dir, input_dir = get_process_input_dir(
-        MERGE_VALID_LOOKUP_PARENT_FOLDER,
+    process_dir, input_dir = get_valid_invalid_process_paths(
         LIFE_CYCLE_SUBPROCESS_FOLDER,
         process_name,
     )
@@ -616,16 +1179,9 @@ def process_life_cycle_files(process_name):
     if not files_to_process:
         return False, "Please upload at least one file before final submit."
 
-    try:
-        header_keywords = get_lc_etc_header_keyword_strings()
-    except Exception as exc:
-        return False, f"Could not load LC/ETC header keywords from database: {exc}"
-
-    if len(header_keywords) < 3:
-        return (
-            False,
-            "Configure at least 3 header keywords for LC/ETC in Header Keywords before running the merge.",
-        )
+    header_keywords, kw_error = fetch_lc_etc_header_keywords_or_error()
+    if kw_error:
+        return False, kw_error
 
     output_dir = process_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -688,10 +1244,193 @@ def run_life_cycle_merge_in_background(process_name):
         life_cycle_state["last_status"] = process_message if ok else f"FAILED: {process_message}"
 
 
+def process_merge_normalize_files(file_kind, process_name):
+    if is_reserved_process_name(process_name):
+        return False, (
+            f"Process name '{process_name}' is reserved. "
+            "Choose a different name (not Merge_&_Normalize, LC/ETC, VRN, input, or output)."
+        )
+
+    process_dir, input_dir, output_dir = ensure_merge_normalize_process_dirs(file_kind, process_name)
+    if not process_dir or not input_dir or not output_dir:
+        return False, "Please provide a valid process name and file type (LC/ETC or VRN)."
+
+    if not input_dir.exists():
+        return False, "Input folder does not exist. Upload files first."
+
+    files_to_process = [p for p in input_dir.iterdir() if p.is_file()]
+    if not files_to_process:
+        return False, "Please upload at least one file before final submit."
+
+    kind = normalize_merge_normalize_file_kind(file_kind)
+    script_dir = Path(__file__).resolve().parent / "Scripts" / "Excempy_Query"
+    header_keywords, kw_error = fetch_lc_etc_header_keywords_or_error()
+    if kw_error:
+        return False, kw_error
+
+    if kind == MERGE_NORMALIZE_VRN_FOLDER:
+        # script_path = script_dir / "normalize_vrn.py"
+        script_path = script_dir / "normalize_vrn_faster.py"
+    elif kind == MERGE_NORMALIZE_LC_ETC_FOLDER:
+        # script_path = script_dir / "normalize_lcy.py"
+        script_path = script_dir / "normalize_lcy_faster.py"
+    else:
+        return False, "File type must be LC/ETC or VRN."
+
+    if not script_path.exists():
+        return False, f"Normalize script not found: {script_path.name}"
+
+    output_file = output_dir / MERGE_NORMALIZE_OUTPUT_FILENAME
+    env = os.environ.copy()
+    env["MERGE_NORMALIZE_INPUT_FOLDER"] = str(input_dir.resolve())
+    env["MERGE_NORMALIZE_OUTPUT_FILE"] = str(output_file.resolve())
+    env["MERGE_NORMALIZE_HEADER_KEYWORDS"] = json.dumps(header_keywords)
+
+    try:
+        result = subprocess.run(
+            ["python", str(script_path)],
+            cwd=str(script_dir),
+            env=env,
+            check=False,
+        )
+    except Exception as exc:
+        return False, f"{MERGE_NORMALIZE_GROUP_LABEL} failed to start: {exc}"
+
+    if result.returncode != 0:
+        return (
+            False,
+            f"{MERGE_NORMALIZE_GROUP_LABEL} ({kind}) failed with exit code {result.returncode}",
+        )
+
+    if not output_file.exists():
+        return (
+            False,
+            "Normalize/merge did not create an output file. Check input formats and header keywords.",
+        )
+
+    return (
+        True,
+        f"{MERGE_NORMALIZE_GROUP_LABEL} finished for '{process_dir.name}' "
+        f"({merge_normalize_file_kind_label(kind)}). "
+        f"Output: output/{output_file.name}",
+    )
+
+
+def run_merge_normalize_in_background(file_kind, process_name):
+    with merge_normalize_state_lock:
+        merge_normalize_state["running"] = True
+        merge_normalize_state["process_type"] = MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        merge_normalize_state["file_kind"] = normalize_merge_normalize_file_kind(file_kind)
+        merge_normalize_state["process_name"] = process_name
+        merge_normalize_state["started_at"] = time.time()
+        merge_normalize_state["finished_at"] = None
+        merge_normalize_state["last_status"] = f"{MERGE_NORMALIZE_GROUP_LABEL} started."
+
+    ok, process_message = process_merge_normalize_files(file_kind, process_name)
+
+    with merge_normalize_state_lock:
+        merge_normalize_state["running"] = False
+        merge_normalize_state["finished_at"] = time.time()
+        merge_normalize_state["last_status"] = process_message if ok else f"FAILED: {process_message}"
+
+
+def process_merge_remove_dup_files(process_name):
+    if is_reserved_process_name(process_name):
+        return False, (
+            f"Process name '{process_name}' is reserved. "
+            "Choose a different name (not Merge_&_Remove_Duplicate, vrn, lc_etc, input, or output)."
+        )
+
+    process_dir, vrn_dir, lc_dir, output_dir = ensure_merge_remove_dup_dirs(process_name)
+    if not process_dir or not vrn_dir or not lc_dir or not output_dir:
+        return False, "Please provide a valid process name."
+
+    vrn_file = get_merge_remove_dup_slot_file(process_name, MERGE_REMOVE_DUP_VRN_SLOT)
+    lc_file = get_merge_remove_dup_slot_file(process_name, MERGE_REMOVE_DUP_LC_SLOT)
+    if not vrn_file:
+        return False, "VRN file is required. Upload or import from Merge + Normalize (VRN) output."
+    if not lc_file:
+        return False, "LC/ETC file is required. Upload or import from Merge + Normalize (LC/ETC) output."
+
+    script_dir = Path(__file__).resolve().parent / "Scripts" / "Excempy_Query"
+    script_path = script_dir / "vrn_lc_final_prcess.py"
+    if not script_path.exists():
+        return False, f"Process script not found: {script_path.name}"
+
+    output_file = output_dir / SEMI_FINAL_OUTPUT_FILENAME
+    env = os.environ.copy()
+    env["VRN_LC_FINAL_VRN_FILE"] = str(vrn_file.resolve())
+    env["VRN_LC_FINAL_LC_FILE"] = str(lc_file.resolve())
+    env["VRN_LC_FINAL_OUTPUT_FILE"] = str(output_file.resolve())
+    env["VRN_LC_FINAL_DEBUG_EXPORT"] = "0"
+
+    try:
+        result = subprocess.run(
+            ["python", str(script_path)],
+            cwd=str(script_dir),
+            env=env,
+            check=False,
+        )
+    except Exception as exc:
+        return False, f"{MERGE_REMOVE_DUP_GROUP_LABEL} failed to start: {exc}"
+
+    if result.returncode != 0:
+        return False, f"{MERGE_REMOVE_DUP_GROUP_LABEL} failed with exit code {result.returncode}"
+
+    if not output_file.exists():
+        return False, f"{MERGE_REMOVE_DUP_GROUP_LABEL} did not create output/{SEMI_FINAL_OUTPUT_FILENAME}."
+
+    return (
+        True,
+        f"{MERGE_REMOVE_DUP_GROUP_LABEL} finished for '{process_dir.name}'. "
+        f"Output: output/{SEMI_FINAL_OUTPUT_FILENAME}",
+    )
+
+
+def run_merge_remove_dup_in_background(process_name):
+    with merge_remove_dup_state_lock:
+        merge_remove_dup_state["running"] = True
+        merge_remove_dup_state["process_type"] = MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        merge_remove_dup_state["process_name"] = process_name
+        merge_remove_dup_state["started_at"] = time.time()
+        merge_remove_dup_state["finished_at"] = None
+        merge_remove_dup_state["last_status"] = f"{MERGE_REMOVE_DUP_GROUP_LABEL} started."
+
+    ok, process_message = process_merge_remove_dup_files(process_name)
+
+    with merge_remove_dup_state_lock:
+        merge_remove_dup_state["running"] = False
+        merge_remove_dup_state["finished_at"] = time.time()
+        merge_remove_dup_state["last_status"] = process_message if ok else f"FAILED: {process_message}"
+
+
 @app.route("/life-cycle-merge-status")
 def life_cycle_merge_status():
     with life_cycle_state_lock:
         state = dict(life_cycle_state)
+    if state["started_at"]:
+        state["elapsed_seconds"] = int(time.time() - state["started_at"])
+    else:
+        state["elapsed_seconds"] = 0
+    return jsonify(state)
+
+
+@app.route("/merge-normalize-status")
+def merge_normalize_status():
+    with merge_normalize_state_lock:
+        state = dict(merge_normalize_state)
+    if state["started_at"]:
+        state["elapsed_seconds"] = int(time.time() - state["started_at"])
+    else:
+        state["elapsed_seconds"] = 0
+    state["file_kind_label"] = merge_normalize_file_kind_label(state.get("file_kind"))
+    return jsonify(state)
+
+
+@app.route("/merge-remove-dup-status")
+def merge_remove_dup_status():
+    with merge_remove_dup_state_lock:
+        state = dict(merge_remove_dup_state)
     if state["started_at"]:
         state["elapsed_seconds"] = int(time.time() - state["started_at"])
     else:
@@ -713,8 +1452,15 @@ def valid_invalid_status():
 @app.context_processor
 def inject_process_labels():
     return {
-        "merge_valid_lookup_group_label": MERGE_VALID_LOOKUP_GROUP_LABEL,
-        "merge_valid_lookup_parent_folder": MERGE_VALID_LOOKUP_PARENT_FOLDER,
+        "valid_invalid_group_label": VALID_INVALID_GROUP_LABEL,
+        "exempt_query_group_label": EXEMPT_QUERY_GROUP_LABEL,
+        "merge_valid_lookup_group_label": VALID_INVALID_GROUP_LABEL,
+        "valid_invalid_parent_folder": VALID_INVALID_PARENT_FOLDER,
+        "merge_valid_lookup_parent_folder": VALID_INVALID_PARENT_FOLDER,
+        "merge_normalize_group_label": MERGE_NORMALIZE_GROUP_LABEL,
+        "merge_remove_dup_group_label": MERGE_REMOVE_DUP_GROUP_LABEL,
+        "exempt_query_parent_folder": EXEMPT_QUERY_PARENT_FOLDER,
+        "merge_normalize_file_kind_labels": MERGE_NORMALIZE_FILE_KIND_LABELS,
     }
 
 
@@ -733,6 +1479,8 @@ def exempt_query_hub():
     return render_template(
         "exempt_query_hub.html",
         exempt_query_folder=EXEMPT_QUERY_PARENT_FOLDER,
+        merge_normalize_folder=MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+        merge_remove_dup_folder=MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
     )
 
 
@@ -742,21 +1490,30 @@ def current_process():
         current_life_cycle_state = dict(life_cycle_state)
     with valid_invalid_state_lock:
         current_valid_invalid_state = dict(valid_invalid_state)
+    with merge_normalize_state_lock:
+        current_merge_normalize_state = dict(merge_normalize_state)
+    with merge_remove_dup_state_lock:
+        current_merge_remove_dup_state = dict(merge_remove_dup_state)
     return render_template(
         "current_process.html",
-        process_directories=list_file_process_directories(),
+        available_processes=list_available_processes(),
         life_cycle_state=current_life_cycle_state,
         valid_invalid_state=current_valid_invalid_state,
+        merge_normalize_state=current_merge_normalize_state,
+        merge_remove_dup_state=current_merge_remove_dup_state,
     )
 
 
 def process_valid_invalid_files(process_name, header_mapping=None):
-    process_dir, input_dir, rate_dir = get_valid_invalid_paths(process_name)
+    if is_reserved_process_name(process_name):
+        return False, (
+            f"Process name '{process_name}' is reserved. "
+            "Choose a different name (not Life_Cycle_Merge, Valid_Invalid_Lookup, input, output, or rate)."
+        )
+    process_dir, input_dir, rate_dir = ensure_valid_invalid_process_dirs(process_name)
     if not process_dir or not input_dir or not rate_dir:
         return False, "Please provide a valid process name."
     # Ensure folder structure exists, then validate required files explicitly.
-    input_dir.mkdir(parents=True, exist_ok=True)
-    rate_dir.mkdir(parents=True, exist_ok=True)
     merged_files = [p for p in input_dir.iterdir() if p.is_file()]
     rate_files = [p for p in rate_dir.iterdir() if p.is_file()] if rate_dir.exists() else []
     if not merged_files:
@@ -827,8 +1584,20 @@ def file_process_directories():
     with valid_invalid_state_lock:
         valid_invalid_running = valid_invalid_state["running"]
         valid_invalid_process_name = valid_invalid_state["process_name"]
+    with merge_normalize_state_lock:
+        merge_normalize_running = merge_normalize_state["running"]
+        merge_normalize_process_name = merge_normalize_state["process_name"]
+        merge_normalize_file_kind = merge_normalize_state["file_kind"]
+    with merge_remove_dup_state_lock:
+        merge_remove_dup_running = merge_remove_dup_state["running"]
+        merge_remove_dup_process_name = merge_remove_dup_state["process_name"]
 
-    delete_disabled = life_cycle_running or valid_invalid_running
+    delete_disabled = (
+        life_cycle_running
+        or valid_invalid_running
+        or merge_normalize_running
+        or merge_remove_dup_running
+    )
     delete_disabled_message = ""
     if life_cycle_running:
         delete_disabled_message = (
@@ -838,6 +1607,30 @@ def file_process_directories():
         delete_disabled_message = (
             "Delete is disabled while Valid/Invalid Lookup is running"
             f" for '{valid_invalid_process_name}'."
+        )
+    elif merge_normalize_running:
+        delete_disabled_message = (
+            f"Delete is disabled while {MERGE_NORMALIZE_GROUP_LABEL} "
+            f"({merge_normalize_file_kind_label(merge_normalize_file_kind)}) is running for '{merge_normalize_process_name}'."
+        )
+    elif merge_remove_dup_running:
+        delete_disabled_message = (
+            f"Delete is disabled while {MERGE_REMOVE_DUP_GROUP_LABEL} "
+            f"is running for '{merge_remove_dup_process_name}'."
+        )
+
+    def _annotate(entries):
+        return annotate_process_button_state(
+            entries,
+            life_cycle_running,
+            life_cycle_process_name,
+            valid_invalid_running,
+            valid_invalid_process_name,
+            merge_normalize_running,
+            merge_normalize_process_name,
+            merge_normalize_file_kind,
+            merge_remove_dup_running,
+            merge_remove_dup_process_name,
         )
 
     if request.method == "POST":
@@ -867,13 +1660,7 @@ def file_process_directories():
                     messages=messages,
                     current_relative=current_relative,
                     parent_relative=parent_relative,
-                    entries=annotate_process_button_state(
-                        entries,
-                        life_cycle_running,
-                        life_cycle_process_name,
-                        valid_invalid_running,
-                        valid_invalid_process_name,
-                    ),
+                    entries=_annotate(entries),
                     delete_disabled=delete_disabled,
                     delete_disabled_message=delete_disabled_message,
                 )
@@ -889,17 +1676,37 @@ def file_process_directories():
                     running = life_cycle_state["running"]
                     running_process_type = life_cycle_state["process_type"]
                     running_process_name = life_cycle_state["process_name"]
+                with merge_normalize_state_lock:
+                    mn_running = merge_normalize_state["running"]
+                    mn_file_kind = merge_normalize_state["file_kind"]
+                    mn_process_name = merge_normalize_state["process_name"]
+                with merge_remove_dup_state_lock:
+                    mrd_running = merge_remove_dup_state["running"]
+                    mrd_process_name = merge_remove_dup_state["process_name"]
 
-                running_process_dir = (
-                    (
-                        FILE_PROCESS_DIR
-                        / MERGE_VALID_LOOKUP_PARENT_FOLDER
-                        / running_process_type
-                        / running_process_name
-                    ).resolve()
-                    if running and running_process_name
+                running_process_dir = None
+                if running and running_process_name:
+                    running_process_dir, _ = get_valid_invalid_process_paths(
+                        running_process_type,
+                        running_process_name,
+                    )
+                    if running_process_dir:
+                        running_process_dir = running_process_dir.resolve()
+                mn_process_dir = (
+                    get_merge_normalize_paths(mn_file_kind, mn_process_name)[0]
+                    if mn_running and mn_process_name and mn_file_kind
                     else None
                 )
+                if mn_process_dir:
+                    mn_process_dir = mn_process_dir.resolve()
+                mrd_process_dir = (
+                    get_merge_remove_dup_paths(mrd_process_name)[0]
+                    if mrd_running and mrd_process_name
+                    else None
+                )
+                if mrd_process_dir:
+                    mrd_process_dir = mrd_process_dir.resolve()
+
                 if (
                     running_process_dir
                     and (target_path == running_process_dir or running_process_dir in target_path.parents)
@@ -908,6 +1715,26 @@ def file_process_directories():
                         (
                             "error",
                             f"Cannot delete '{running_process_name}' while its merge process is running.",
+                        )
+                    )
+                elif (
+                    mn_process_dir
+                    and (target_path == mn_process_dir or mn_process_dir in target_path.parents)
+                ):
+                    messages.append(
+                        (
+                            "error",
+                            f"Cannot delete '{mn_process_name}' while {MERGE_NORMALIZE_GROUP_LABEL} is running.",
+                        )
+                    )
+                elif (
+                    mrd_process_dir
+                    and (target_path == mrd_process_dir or mrd_process_dir in target_path.parents)
+                ):
+                    messages.append(
+                        (
+                            "error",
+                            f"Cannot delete '{mrd_process_name}' while {MERGE_REMOVE_DUP_GROUP_LABEL} is running.",
                         )
                     )
                 else:
@@ -938,17 +1765,11 @@ def file_process_directories():
             elif target_path.name != "input":
                 messages.append(("error", "Process can only be started from an input folder."))
             else:
-                try:
-                    process_name = target_path.parent.name
-                    subprocess_folder = target_path.parent.parent.name
-                    parent_folder = target_path.parent.parent.parent.name
-                    process_type = subprocess_folder
-                except Exception:
-                    process_name = ""
-                    subprocess_folder = ""
-                    parent_folder = ""
-                    process_type = ""
-
+                context = parse_input_folder_context(target_path)
+                process_name = (context or {}).get("process_name") or ""
+                parent_folder = (context or {}).get("parent_folder") or ""
+                process_type = (context or {}).get("process_type") or ""
+                file_kind = (context or {}).get("file_kind") or ""
                 process_dir = target_path.parent
                 output_dir = process_dir / "output"
                 existing_output_items = []
@@ -988,62 +1809,145 @@ def file_process_directories():
                     or "Failed to clear output folder" in messages[-1][1]
                 ):
                     pass
+                elif (
+                    parent_folder == EXEMPT_QUERY_PARENT_FOLDER
+                    and process_type == MERGE_NORMALIZE_SUBPROCESS_FOLDER
+                ):
+                    keywords, kw_error = fetch_lc_etc_header_keywords_or_error()
+                    if kw_error:
+                        messages.append(("error", kw_error))
+                    else:
+                        with merge_normalize_state_lock:
+                            running = merge_normalize_state["running"]
+                        if running:
+                            messages.append(
+                                (
+                                    "error",
+                                    f"A {MERGE_NORMALIZE_GROUP_LABEL} process is already running. Please wait for it to finish.",
+                                )
+                            )
+                        elif not file_kind:
+                            messages.append(("error", "Could not determine LC/ETC or VRN file type for this folder."))
+                        else:
+                            worker = threading.Thread(
+                                target=run_merge_normalize_in_background,
+                                args=(file_kind, process_name),
+                                daemon=True,
+                            )
+                            worker.start()
+                            messages.append(
+                                (
+                                    "success",
+                                    process_started_success_message(
+                                        MERGE_NORMALIZE_GROUP_LABEL,
+                                        process_name,
+                                        merge_normalize_file_kind_label(file_kind),
+                                    ),
+                                )
+                            )
+                elif (
+                    parent_folder == EXEMPT_QUERY_PARENT_FOLDER
+                    and process_type == MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+                ):
+                    with merge_remove_dup_state_lock:
+                        running = merge_remove_dup_state["running"]
+                    if running:
+                        messages.append(
+                            (
+                                "error",
+                                f"A {MERGE_REMOVE_DUP_GROUP_LABEL} process is already running. Please wait for it to finish.",
+                            )
+                        )
+                    else:
+                        worker = threading.Thread(
+                            target=run_merge_remove_dup_in_background,
+                            args=(process_name,),
+                            daemon=True,
+                        )
+                        worker.start()
+                        messages.append(
+                            (
+                                "success",
+                                process_started_success_message(
+                                    MERGE_REMOVE_DUP_GROUP_LABEL, process_name
+                                ),
+                            )
+                        )
                 elif parent_folder == EXEMPT_QUERY_PARENT_FOLDER:
                     messages.append(
                         (
                             "error",
-                            "Exempt Query processing is not yet available from the directory browser.",
+                            f"Exempt Query processing from Directories is only available for "
+                            f"{MERGE_NORMALIZE_GROUP_LABEL} and {MERGE_REMOVE_DUP_GROUP_LABEL}.",
                         )
                     )
-                elif parent_folder != MERGE_VALID_LOOKUP_PARENT_FOLDER:
+                elif not is_valid_invalid_parent_folder(parent_folder):
                     messages.append(("error", "Unsupported process group for this input folder."))
                 elif process_type == LIFE_CYCLE_PROCESS_FOLDER:
-                    with life_cycle_state_lock:
-                        running = life_cycle_state["running"]
+                    keywords, kw_error = fetch_lc_etc_header_keywords_or_error()
+                    if kw_error:
+                        messages.append(("error", kw_error))
+                    else:
+                        with life_cycle_state_lock:
+                            running = life_cycle_state["running"]
 
-                    if running:
-                        messages.append(
-                            (
-                                "error",
-                                "A life cycle merge is already running. Please wait for it to finish.",
+                        if running:
+                            messages.append(
+                                (
+                                    "error",
+                                    "A life cycle merge is already running. Please wait for it to finish.",
+                                )
                             )
-                        )
-                    else:
-                        worker = threading.Thread(
-                            target=run_life_cycle_merge_in_background,
-                            args=(process_name,),
-                            daemon=True,
-                        )
-                        worker.start()
-                        messages.append(
-                            (
-                                "success",
-                                f"Life cycle merge started in background for '{process_name}'.",
+                        else:
+                            worker = threading.Thread(
+                                target=run_life_cycle_merge_in_background,
+                                args=(process_name,),
+                                daemon=True,
                             )
-                        )
+                            worker.start()
+                            messages.append(
+                                (
+                                    "success",
+                                    process_started_success_message(
+                                        "Life cycle merge", process_name
+                                    ),
+                                )
+                            )
                 elif process_type == VALID_INVALID_PROCESS_FOLDER:
-                    with valid_invalid_state_lock:
-                        running = valid_invalid_state["running"]
-                    if running:
+                    header_mapping = load_vil_header_mapping_from_disk(process_name)
+                    if not is_vil_header_mapping_complete(header_mapping):
                         messages.append(
                             (
                                 "error",
-                                "A Valid/Invalid Lookup process is already running. Please wait for it to finish.",
+                                "Header mapping is incomplete. Open Valid/Invalid Lookup, "
+                                "map headers, and confirm before processing from Directories.",
                             )
                         )
                     else:
-                        worker = threading.Thread(
-                            target=run_valid_invalid_in_background,
-                            args=(process_name,),
-                            daemon=True,
-                        )
-                        worker.start()
-                        messages.append(
-                            (
-                                "success",
-                                f"Valid/Invalid Lookup started in background for '{process_name}'.",
+                        with valid_invalid_state_lock:
+                            running = valid_invalid_state["running"]
+                        if running:
+                            messages.append(
+                                (
+                                    "error",
+                                    "A Valid/Invalid Lookup process is already running. Please wait for it to finish.",
+                                )
                             )
-                        )
+                        else:
+                            worker = threading.Thread(
+                                target=run_valid_invalid_in_background,
+                                args=(process_name, header_mapping),
+                                daemon=True,
+                            )
+                            worker.start()
+                            messages.append(
+                                (
+                                    "success",
+                                    process_started_success_message(
+                                        "Valid/Invalid Lookup", process_name
+                                    ),
+                                )
+                            )
                 else:
                     messages.append(("error", "Unsupported process type for this input folder."))
 
@@ -1052,13 +1956,7 @@ def file_process_directories():
         current_path, entries = list_directory_entries("")
         messages.append(("error", "Invalid directory path selected."))
 
-    entries = annotate_process_button_state(
-        entries,
-        life_cycle_running,
-        life_cycle_process_name,
-        valid_invalid_running,
-        valid_invalid_process_name,
-    )
+    entries = _annotate(entries)
 
     current_relative = (
         current_path.relative_to(FILE_PROCESS_DIR.resolve()).as_posix()
@@ -1135,6 +2033,372 @@ def api_delete_lc_etc_header_keyword(keyword_id):
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/merge-normalize", methods=["GET", "POST"])
+def merge_normalize():
+    messages = []
+    reset_form_after_submit = False
+    current_process_name = request.form.get("process_name", "").strip() if request.method == "POST" else ""
+    current_file_kind = (
+        normalize_merge_normalize_file_kind(request.form.get("file_kind", ""))
+        if request.method == "POST"
+        else ""
+    )
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        if current_process_name and is_reserved_process_name(current_process_name):
+            messages.append(
+                (
+                    "error",
+                    f"Process name '{current_process_name}' is reserved. "
+                    "Use a different name (not Merge_&_Normalize, LC/ETC, VRN, input, or output).",
+                )
+            )
+            process_dir, input_dir, output_dir = (None, None, None)
+        else:
+            process_dir, input_dir, output_dir = get_merge_normalize_paths(
+                current_file_kind, current_process_name
+            )
+
+        if action == "upload":
+            if not current_file_kind:
+                messages.append(("error", "Select whether files are VRN or LC/ETC before upload."))
+            elif not process_dir or not input_dir:
+                messages.append(("error", "Process name is required before upload."))
+            else:
+                input_dir.mkdir(parents=True, exist_ok=True)
+                (output_dir or process_dir / "output").mkdir(parents=True, exist_ok=True)
+                uploaded_files = request.files.getlist("files")
+                if not uploaded_files or all(not file.filename for file in uploaded_files):
+                    messages.append(("error", "Please select at least one file to upload."))
+                else:
+                    existing_files = {
+                        name.lower()
+                        for name in list_merge_normalize_uploaded_files(
+                            current_file_kind, current_process_name
+                        )
+                    }
+                    uploaded_count = 0
+                    skipped_duplicates = []
+                    skipped_invalid = []
+
+                    for file in uploaded_files:
+                        if not file or not file.filename:
+                            continue
+
+                        original_name = secure_filename(file.filename)
+                        if not original_name:
+                            skipped_invalid.append(file.filename)
+                            continue
+
+                        if not allowed_file(original_name):
+                            skipped_invalid.append(original_name)
+                            continue
+
+                        if original_name.lower() in existing_files:
+                            skipped_duplicates.append(original_name)
+                            continue
+
+                        file.save(input_dir / original_name)
+                        existing_files.add(original_name.lower())
+                        uploaded_count += 1
+
+                    if uploaded_count:
+                        messages.append(("success", f"Uploaded {uploaded_count} file(s)."))
+                    if skipped_duplicates:
+                        messages.append(
+                            ("error", f"Skipped duplicate file(s): {', '.join(skipped_duplicates)}")
+                        )
+                    if skipped_invalid:
+                        messages.append(
+                            (
+                                "error",
+                                "Skipped unsupported/invalid file(s): "
+                                f"{', '.join(skipped_invalid)}",
+                            )
+                        )
+
+        elif action == "delete":
+            raw_filename = request.form.get("filename", "")
+            filename = secure_filename(raw_filename)
+
+            if not current_file_kind:
+                messages.append(("error", "Select whether files are VRN or LC/ETC before delete."))
+            elif not process_dir or not input_dir:
+                messages.append(("error", "Process name is required before delete."))
+            elif not filename:
+                messages.append(("error", "Invalid filename."))
+            else:
+                file_path = input_dir / filename
+                if file_path.exists() and file_path.is_file():
+                    try:
+                        file_path.unlink()
+                        messages.append(("success", f"Deleted file: {filename}"))
+                    except PermissionError:
+                        messages.append(
+                            (
+                                "error",
+                                "Cannot delete this file because it is currently in use by another process.",
+                            )
+                        )
+                    except OSError as exc:
+                        messages.append(("error", f"Delete failed: {exc}"))
+                else:
+                    messages.append(("error", f"File not found: {filename}"))
+
+        elif action == "process":
+            if not current_process_name:
+                messages.append(("error", "Process name is required before final submit."))
+            elif not current_file_kind:
+                messages.append(("error", "Select whether files are VRN or LC/ETC before submit."))
+            elif is_reserved_process_name(current_process_name):
+                messages.append(
+                    (
+                        "error",
+                        f"Process name '{current_process_name}' is reserved. "
+                        "Use a different name (not Merge_&_Normalize, LC/ETC, VRN, input, or output).",
+                    )
+                )
+            else:
+                process_dir, input_dir, output_dir = ensure_merge_normalize_process_dirs(
+                    current_file_kind, current_process_name
+                )
+                uploaded_count = 0
+                if input_dir and input_dir.exists():
+                    uploaded_count = sum(1 for p in input_dir.iterdir() if p.is_file())
+                if uploaded_count < MIN_MERGE_NORMALIZE_FILES:
+                    messages.append(
+                        (
+                            "error",
+                            f"Upload at least {MIN_MERGE_NORMALIZE_FILES} file(s) before starting.",
+                        )
+                    )
+                else:
+                    with merge_normalize_state_lock:
+                        running = merge_normalize_state["running"]
+                    if running:
+                        messages.append(
+                            (
+                                "error",
+                                f"A {MERGE_NORMALIZE_GROUP_LABEL} process is already running. Please wait for it to finish.",
+                            )
+                        )
+                    else:
+                        worker = threading.Thread(
+                            target=run_merge_normalize_in_background,
+                            args=(current_file_kind, current_process_name),
+                            daemon=True,
+                        )
+                        worker.start()
+                        messages.append(
+                            (
+                                "success",
+                                process_started_success_message(
+                                    MERGE_NORMALIZE_GROUP_LABEL,
+                                    current_process_name,
+                                    merge_normalize_file_kind_label(current_file_kind),
+                                ),
+                            )
+                        )
+                        reset_form_after_submit = True
+                        current_process_name = ""
+                        current_file_kind = ""
+
+    uploaded_files = (
+        list_merge_normalize_uploaded_files(current_file_kind, current_process_name)
+        if current_process_name and current_file_kind
+        else []
+    )
+
+    return render_template(
+        "merge_normalize.html",
+        current_process_name=current_process_name,
+        current_file_kind=current_file_kind,
+        uploaded_files=uploaded_files,
+        messages=messages,
+        allowed_extensions=sorted(ALLOWED_EXTENSIONS),
+        reset_form_after_submit=reset_form_after_submit,
+        min_merge_normalize_files=MIN_MERGE_NORMALIZE_FILES,
+        min_header_keywords=MIN_LC_ETC_HEADER_KEYWORDS,
+        file_kinds=MERGE_NORMALIZE_FILE_KINDS,
+        file_kind_labels=MERGE_NORMALIZE_FILE_KIND_LABELS,
+        header_keywords_modal_title=f"Header Keywords ({HEADER_KEYWORDS_LC_ETC_VRN_LABEL})",
+        header_keywords_modal_description=(
+            "Shared keyword list for LC/ETC and VRN header detection. "
+            f"At least {MIN_LC_ETC_HEADER_KEYWORDS} keywords are required."
+        ),
+        merge_normalize_folder=MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+    )
+
+
+@app.route("/merge-remove-duplicate", methods=["GET", "POST"])
+def merge_remove_duplicate():
+    messages = []
+    reset_form_after_submit = False
+    current_process_name = request.form.get("process_name", "").strip() if request.method == "POST" else ""
+
+    vrn_outputs = list_merge_normalize_output_files(MERGE_NORMALIZE_VRN_FOLDER)
+    lc_outputs = list_merge_normalize_output_files(MERGE_NORMALIZE_LC_ETC_FOLDER)
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if current_process_name and is_reserved_process_name(current_process_name):
+            messages.append(
+                (
+                    "error",
+                    f"Process name '{current_process_name}' is reserved. "
+                    "Use a different name (not Merge_&_Remove_Duplicate, vrn, lc_etc, input, or output).",
+                )
+            )
+        elif action == "upload":
+            if not current_process_name:
+                messages.append(("error", "Process name is required before upload."))
+            else:
+                ensure_merge_remove_dup_dirs(current_process_name)
+                vrn_source = request.form.get("vrn_source", "upload").strip()
+                lc_source = request.form.get("lc_source", "upload").strip()
+
+                if vrn_source == "import":
+                    vrn_rel = request.form.get("vrn_import", "").strip()
+                    vrn_path = resolve_merge_normalize_output_import(
+                        vrn_rel, MERGE_NORMALIZE_VRN_FOLDER
+                    )
+                    if not vrn_path:
+                        messages.append(("error", "Select a valid VRN file from Merge + Normalize output."))
+                    else:
+                        copy_to_merge_remove_dup_slot(
+                            current_process_name, MERGE_REMOVE_DUP_VRN_SLOT, vrn_path
+                        )
+                        messages.append(("success", f"Imported VRN file from {vrn_path.name}."))
+                else:
+                    vrn_upload = request.files.get("vrn_file")
+                    if vrn_upload and vrn_upload.filename:
+                        original_name = secure_filename(vrn_upload.filename)
+                        if not allowed_merge_remove_dup_file(original_name):
+                            messages.append(("error", "VRN file must be a .csv."))
+                        else:
+                            _, vrn_dir, _, _ = ensure_merge_remove_dup_dirs(current_process_name)
+                            clear_merge_remove_dup_slot(current_process_name, MERGE_REMOVE_DUP_VRN_SLOT)
+                            vrn_upload.save(vrn_dir / original_name)
+                            messages.append(("success", f"Uploaded VRN file: {original_name}"))
+
+                if lc_source == "import":
+                    lc_rel = request.form.get("lc_import", "").strip()
+                    lc_path = resolve_merge_normalize_output_import(
+                        lc_rel, MERGE_NORMALIZE_LC_ETC_FOLDER
+                    )
+                    if not lc_path:
+                        messages.append(("error", "Select a valid LC/ETC file from Merge + Normalize output."))
+                    else:
+                        copy_to_merge_remove_dup_slot(
+                            current_process_name, MERGE_REMOVE_DUP_LC_SLOT, lc_path
+                        )
+                        messages.append(("success", f"Imported LC/ETC file from {lc_path.name}."))
+                else:
+                    lc_upload = request.files.get("lc_file")
+                    if lc_upload and lc_upload.filename:
+                        original_name = secure_filename(lc_upload.filename)
+                        if not allowed_merge_remove_dup_file(original_name):
+                            messages.append(("error", "LC/ETC file must be a .csv."))
+                        else:
+                            _, _, lc_dir, _ = ensure_merge_remove_dup_dirs(current_process_name)
+                            clear_merge_remove_dup_slot(current_process_name, MERGE_REMOVE_DUP_LC_SLOT)
+                            lc_upload.save(lc_dir / original_name)
+                            messages.append(("success", f"Uploaded LC/ETC file: {original_name}"))
+
+        elif action == "delete":
+            slot = request.form.get("slot", "").strip()
+            filename = secure_filename(request.form.get("filename", ""))
+            if not current_process_name:
+                messages.append(("error", "Process name is required before delete."))
+            elif slot not in (MERGE_REMOVE_DUP_VRN_SLOT, MERGE_REMOVE_DUP_LC_SLOT):
+                messages.append(("error", "Invalid file slot."))
+            elif not filename:
+                messages.append(("error", "Invalid filename."))
+            else:
+                _, vrn_dir, lc_dir, _ = get_merge_remove_dup_paths(current_process_name)
+                slot_dir = vrn_dir if slot == MERGE_REMOVE_DUP_VRN_SLOT else lc_dir
+                file_path = slot_dir / filename if slot_dir else None
+                if file_path and file_path.exists() and file_path.is_file():
+                    try:
+                        file_path.unlink()
+                        messages.append(("success", f"Deleted file: {filename}"))
+                    except OSError as exc:
+                        messages.append(("error", f"Delete failed: {exc}"))
+                else:
+                    messages.append(("error", f"File not found: {filename}"))
+
+        elif action == "process":
+            if not current_process_name:
+                messages.append(("error", "Process name is required before final submit."))
+            elif is_reserved_process_name(current_process_name):
+                messages.append(
+                    (
+                        "error",
+                        f"Process name '{current_process_name}' is reserved. "
+                        "Use a different name (not Merge_&_Remove_Duplicate, vrn, lc_etc, input, or output).",
+                    )
+                )
+            elif not get_merge_remove_dup_slot_file(current_process_name, MERGE_REMOVE_DUP_VRN_SLOT):
+                messages.append(
+                    ("error", "VRN file is required. Upload or import from Merge + Normalize (VRN) output.")
+                )
+            elif not get_merge_remove_dup_slot_file(current_process_name, MERGE_REMOVE_DUP_LC_SLOT):
+                messages.append(
+                    ("error", "LC/ETC file is required. Upload or import from Merge + Normalize (LC/ETC) output.")
+                )
+            else:
+                with merge_remove_dup_state_lock:
+                    running = merge_remove_dup_state["running"]
+                if running:
+                    messages.append(
+                        (
+                            "error",
+                            f"A {MERGE_REMOVE_DUP_GROUP_LABEL} process is already running. Please wait for it to finish.",
+                        )
+                    )
+                else:
+                    worker = threading.Thread(
+                        target=run_merge_remove_dup_in_background,
+                        args=(current_process_name,),
+                        daemon=True,
+                    )
+                    worker.start()
+                    messages.append(
+                        (
+                            "success",
+                            process_started_success_message(
+                                MERGE_REMOVE_DUP_GROUP_LABEL, current_process_name
+                            ),
+                        )
+                    )
+                    reset_form_after_submit = True
+                    current_process_name = ""
+
+    vrn_files = list_merge_remove_dup_slot_files(current_process_name) if current_process_name else []
+    lc_files = (
+        list_merge_remove_dup_slot_files(current_process_name, MERGE_REMOVE_DUP_LC_SLOT)
+        if current_process_name
+        else []
+    )
+    submit_ready = bool(current_process_name and vrn_files and lc_files)
+
+    return render_template(
+        "merge_remove_duplicate.html",
+        current_process_name=current_process_name,
+        vrn_files=vrn_files,
+        lc_files=lc_files,
+        vrn_outputs=vrn_outputs,
+        lc_outputs=lc_outputs,
+        messages=messages,
+        reset_form_after_submit=reset_form_after_submit,
+        submit_ready=submit_ready,
+        semi_final_output_filename=SEMI_FINAL_OUTPUT_FILENAME,
+        merge_normalize_output_filename=MERGE_NORMALIZE_OUTPUT_FILENAME,
+    )
+
+
 @app.route("/life-cycle-merge", methods=["GET", "POST"])
 def life_cycle_merge():
     messages = []
@@ -1143,8 +2407,7 @@ def life_cycle_merge():
 
     if request.method == "POST":
         action = request.form.get("action")
-        process_dir, input_dir = get_process_input_dir(
-            MERGE_VALID_LOOKUP_PARENT_FOLDER,
+        process_dir, input_dir = get_valid_invalid_process_paths(
             LIFE_CYCLE_SUBPROCESS_FOLDER,
             current_process_name,
         )
@@ -1236,8 +2499,7 @@ def life_cycle_merge():
             if not current_process_name:
                 messages.append(("error", "Process name is required before final submit."))
             else:
-                process_dir, input_dir = get_process_input_dir(
-                    MERGE_VALID_LOOKUP_PARENT_FOLDER,
+                process_dir, input_dir = get_valid_invalid_process_paths(
                     LIFE_CYCLE_SUBPROCESS_FOLDER,
                     current_process_name,
                 )
@@ -1271,21 +2533,13 @@ def life_cycle_merge():
                         messages.append(
                             (
                                 "success",
-                                f"Merge started in background for '{current_process_name}'. "
-                                "You can navigate to other pages.",
+                                process_started_success_message(
+                                    "Life cycle merge", current_process_name
+                                ),
                             )
                         )
                         reset_form_after_submit = True
                         current_process_name = ""
-
-    with life_cycle_state_lock:
-        current_life_cycle_state = dict(life_cycle_state)
-
-    try:
-        lc_etc_header_keywords = get_lc_etc_header_keyword_records()
-    except Exception as exc:
-        lc_etc_header_keywords = []
-        messages.append(("error", f"Could not load LC/ETC header keywords from database: {exc}"))
 
     return render_template(
         "life_cycle_merge.html",
@@ -1300,11 +2554,14 @@ def life_cycle_merge():
         file_process_directories=list_file_process_directories(),
         messages=messages,
         allowed_extensions=sorted(ALLOWED_EXTENSIONS),
-        life_cycle_state=current_life_cycle_state,
         reset_form_after_submit=reset_form_after_submit,
         min_life_cycle_merge_files=MIN_LIFE_CYCLE_MERGE_FILES,
-        lc_etc_header_keywords=lc_etc_header_keywords,
-        lc_etc_file_type=LC_ETC_FILE_TYPE,
+        min_header_keywords=MIN_LC_ETC_HEADER_KEYWORDS,
+        header_keywords_modal_title=f"Header Keywords ({LC_ETC_FILE_TYPE})",
+        header_keywords_modal_description=(
+            "Each keyword is stored as one row in nhit_file_process. "
+            f"At least {MIN_LC_ETC_HEADER_KEYWORDS} keywords are required for merge header detection."
+        ),
     )
 
 
@@ -1318,14 +2575,24 @@ def valid_invalid_lookup():
 
     if request.method == "POST":
         action = request.form.get("action")
-        process_dir, input_dir, rate_dir = get_valid_invalid_paths(current_process_name)
+        if current_process_name and is_reserved_process_name(current_process_name):
+            messages.append(
+                (
+                    "error",
+                    f"Process name '{current_process_name}' is reserved. "
+                    "Use a different name (not Life_Cycle_Merge, Valid_Invalid_Lookup, input, output, or rate).",
+                )
+            )
+            process_dir, input_dir, rate_dir = (None, None, None)
+        else:
+            process_dir, input_dir, rate_dir = get_valid_invalid_paths(current_process_name)
 
         if action == "upload":
             if not process_dir or not input_dir or not rate_dir:
-                messages.append(("error", "Process name is required before upload."))
+                if not any(message_type == "error" for message_type, _ in messages):
+                    messages.append(("error", "Process name is required before upload."))
             else:
-                input_dir.mkdir(parents=True, exist_ok=True)
-                rate_dir.mkdir(parents=True, exist_ok=True)
+                process_dir, input_dir, rate_dir = ensure_valid_invalid_process_dirs(current_process_name)
 
                 merged_source = request.form.get("merged_source", "upload").strip()
                 merged_file = request.files.get("merged_life_cycle_file")
@@ -1445,6 +2712,7 @@ def valid_invalid_lookup():
                                 )
                             )
                         else:
+                            ensure_valid_invalid_process_dirs(current_process_name)
                             pending_path, _pending_source = get_vil_pending_merged_preview_path(current_process_name)
                             if pending_path:
                                 try:
@@ -1513,13 +2781,19 @@ def valid_invalid_lookup():
         elif action == "process":
             if not current_process_name:
                 messages.append(("error", "Process name is required before final submit."))
+            elif is_reserved_process_name(current_process_name):
+                messages.append(
+                    (
+                        "error",
+                        f"Process name '{current_process_name}' is reserved. "
+                        "Use a different name (not Life_Cycle_Merge, Valid_Invalid_Lookup, input, output, or rate).",
+                    )
+                )
             else:
-                process_dir, input_dir, rate_dir = get_valid_invalid_paths(current_process_name)
+                process_dir, input_dir, rate_dir = ensure_valid_invalid_process_dirs(current_process_name)
                 if not process_dir or not input_dir or not rate_dir:
                     messages.append(("error", "Invalid process name."))
                 else:
-                    input_dir.mkdir(parents=True, exist_ok=True)
-                    rate_dir.mkdir(parents=True, exist_ok=True)
                     confirmed_merged_files = [p for p in input_dir.iterdir() if p.is_file()]
 
                     if not confirmed_merged_files:
@@ -1568,8 +2842,9 @@ def valid_invalid_lookup():
                     messages.append(
                         (
                             "success",
-                            f"Valid/Invalid Lookup started in background for '{current_process_name}'. "
-                            "You can navigate to other pages.",
+                            process_started_success_message(
+                                "Valid/Invalid Lookup", current_process_name
+                            ),
                         )
                     )
 

@@ -3,17 +3,52 @@
 {% block title %}Process Management{% endblock %}
 
 {% block content %}
+<style>
+    .process-parent-badge {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 4px 10px;
+        margin-bottom: 8px;
+        border-radius: 999px;
+        background: rgba(99, 102, 241, 0.12);
+        border: 1px solid rgba(99, 102, 241, 0.28);
+        color: #4338ca;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: none;
+    }
+    .process-parent-badge.exempt-query {
+        background: rgba(16, 185, 129, 0.12);
+        border-color: rgba(16, 185, 129, 0.28);
+        color: #047857;
+    }
+    .process-row-main {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+    .process-subtype {
+        font-size: 13px;
+    }
+    .status-parent-badge {
+        margin-bottom: 8px;
+    }
+</style>
 <section class="page-header">
     <div>
         <p class="eyebrow">Process Management</p>
         <h1>Available Processes</h1>
-        <p>This list shows top-level process groups currently available under <code>File_Process</code>.</p>
+        <p>This list shows every process instance under <code>File_Process</code>, grouped by parent process.</p>
     </div>
 </section>
 
 <article id="merge-status-card" class="card" style="margin-bottom: 22px;">
     <div class="section-head">
         <div>
+            <span class="process-parent-badge status-parent-badge">{{ valid_invalid_group_label }}</span>
             <h2>Life Cycle Merge Process</h2>
             <p id="merge-status-text">
                 {% if life_cycle_state.running %}
@@ -38,6 +73,7 @@
 <article id="valid-invalid-status-card" class="card" style="margin-bottom: 22px;">
     <div class="section-head">
         <div>
+            <span class="process-parent-badge status-parent-badge">{{ valid_invalid_group_label }}</span>
             <h2>Valid/Invalid Lookup Process</h2>
             <p id="valid-invalid-status-text">
                 {% if valid_invalid_state.running %}
@@ -59,19 +95,73 @@
     </div>
 </article>
 
+<article id="merge-normalize-status-card" class="card" style="margin-bottom: 22px;">
+    <div class="section-head">
+        <div>
+            <span class="process-parent-badge exempt-query status-parent-badge">{{ exempt_query_group_label }}</span>
+            <h2>{{ merge_normalize_group_label }} Process</h2>
+            <p id="merge-normalize-status-text">
+                {% if merge_normalize_state.running %}
+                    Processing is ongoing for "{{ merge_normalize_state.process_name }}" ({{ merge_normalize_file_kind_labels.get(merge_normalize_state.file_kind, merge_normalize_state.file_kind) }}).
+                {% elif merge_normalize_state.last_status %}
+                    {{ merge_normalize_state.last_status }}
+                {% else %}
+                    No {{ merge_normalize_group_label }} process is running.
+                {% endif %}
+            </p>
+            <p id="merge-normalize-status-time" class="muted">
+                {% if merge_normalize_state.running and merge_normalize_state.started_at %}
+                    Elapsed: calculating...
+                {% else %}
+                    Elapsed: -
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</article>
+
+<article id="merge-remove-dup-status-card" class="card" style="margin-bottom: 22px;">
+    <div class="section-head">
+        <div>
+            <span class="process-parent-badge exempt-query status-parent-badge">{{ exempt_query_group_label }}</span>
+            <h2>{{ merge_remove_dup_group_label }} Process</h2>
+            <p id="merge-remove-dup-status-text">
+                {% if merge_remove_dup_state.running %}
+                    Processing is ongoing for "{{ merge_remove_dup_state.process_name }}".
+                {% elif merge_remove_dup_state.last_status %}
+                    {{ merge_remove_dup_state.last_status }}
+                {% else %}
+                    No {{ merge_remove_dup_group_label }} process is running.
+                {% endif %}
+            </p>
+            <p id="merge-remove-dup-status-time" class="muted">
+                {% if merge_remove_dup_state.running and merge_remove_dup_state.started_at %}
+                    Elapsed: calculating...
+                {% else %}
+                    Elapsed: -
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</article>
+
 <article class="list-card">
     <div class="section-head">
         <div>
             <h2>Process Folders</h2>
-            <p>Same process listing currently shown from the folder browser.</p>
+            <p>Each row shows the parent process badge, process name, and sub-process type.</p>
         </div>
     </div>
-    {% if process_directories %}
+    {% if available_processes %}
         <ul class="data-list">
-            {% for dirname in process_directories %}
+            {% for item in available_processes %}
                 <li class="data-row">
-                    <span class="data-name">{{ dirname }}</span>
-                    <a class="btn secondary" href="{{ url_for('file_process_directories', path=dirname) }}">Open</a>
+                    <div class="process-row-main">
+                        <span class="process-parent-badge{% if item.parent_label == exempt_query_group_label %} exempt-query{% endif %}">{{ item.parent_label }}</span>
+                        <span class="data-name">{{ item.process_name }}</span>
+                        <span class="muted process-subtype">{{ item.subprocess_label }}</span>
+                    </div>
+                    <a class="btn secondary" href="{{ url_for('file_process_directories', path=item.relative_path) }}">Open</a>
                 </li>
             {% endfor %}
         </ul>
@@ -87,6 +177,10 @@
     const mergeStatusTime = document.getElementById("merge-status-time");
     const validInvalidStatusText = document.getElementById("valid-invalid-status-text");
     const validInvalidStatusTime = document.getElementById("valid-invalid-status-time");
+    const mergeNormalizeStatusText = document.getElementById("merge-normalize-status-text");
+    const mergeNormalizeStatusTime = document.getElementById("merge-normalize-status-time");
+    const mergeRemoveDupStatusText = document.getElementById("merge-remove-dup-status-text");
+    const mergeRemoveDupStatusTime = document.getElementById("merge-remove-dup-status-time");
 
     function formatElapsed(seconds) {
         const hrs = Math.floor(seconds / 3600);
@@ -133,9 +227,54 @@
         }
     }
 
+    async function refreshMergeNormalizeStatus() {
+        try {
+            const response = await fetch("{{ url_for('merge_normalize_status') }}");
+            if (!response.ok) return;
+            const state = await response.json();
+
+            if (state.running) {
+                const kindLabel = state.file_kind_label || state.file_kind || "?";
+                mergeNormalizeStatusText.textContent =
+                    `Processing is ongoing for "${state.process_name}" (${kindLabel}).`;
+                mergeNormalizeStatusTime.textContent = `Elapsed: ${formatElapsed(state.elapsed_seconds || 0)}`;
+            } else {
+                mergeNormalizeStatusText.textContent =
+                    state.last_status || "No {{ merge_normalize_group_label }} process is running.";
+                mergeNormalizeStatusTime.textContent = "Elapsed: -";
+            }
+        } catch (err) {
+            // Ignore intermittent polling errors and keep previous status.
+        }
+    }
+
+    async function refreshMergeRemoveDupStatus() {
+        try {
+            const response = await fetch("{{ url_for('merge_remove_dup_status') }}");
+            if (!response.ok) return;
+            const state = await response.json();
+
+            if (state.running) {
+                mergeRemoveDupStatusText.textContent =
+                    `Processing is ongoing for "${state.process_name}".`;
+                mergeRemoveDupStatusTime.textContent = `Elapsed: ${formatElapsed(state.elapsed_seconds || 0)}`;
+            } else {
+                mergeRemoveDupStatusText.textContent =
+                    state.last_status || "No {{ merge_remove_dup_group_label }} process is running.";
+                mergeRemoveDupStatusTime.textContent = "Elapsed: -";
+            }
+        } catch (err) {
+            // Ignore intermittent polling errors and keep previous status.
+        }
+    }
+
     refreshMergeStatus();
     refreshValidInvalidStatus();
+    refreshMergeNormalizeStatus();
+    refreshMergeRemoveDupStatus();
     setInterval(refreshMergeStatus, 3000);
     setInterval(refreshValidInvalidStatus, 3000);
+    setInterval(refreshMergeNormalizeStatus, 3000);
+    setInterval(refreshMergeRemoveDupStatus, 3000);
 </script>
 {% endblock %}

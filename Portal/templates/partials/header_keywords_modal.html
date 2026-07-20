@@ -1,0 +1,221 @@
+<div class="modal fade" id="headerKeywordsModal" tabindex="-1" aria-labelledby="headerKeywordsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content header-keywords-modal">
+            <div class="modal-header">
+                <h5 class="modal-title" id="headerKeywordsModalLabel">{{ header_keywords_modal_title }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="muted">{{ header_keywords_modal_description }}</p>
+                <div id="header-keywords-error" class="message error" style="display: none; margin-bottom: 14px;"></div>
+                <form id="header-keyword-add-form" class="stack" style="margin-bottom: 18px;">
+                    <label for="header_keyword_add_input" class="muted">Add keyword</label>
+                    <div class="form-control-row">
+                        <input id="header_keyword_add_input" class="field" type="text" placeholder="Enter header keyword" required>
+                        <button class="btn" type="submit">Add</button>
+                    </div>
+                </form>
+                <h3 style="margin-bottom: 10px;">Current keywords</h3>
+                <div id="header-keywords-loading" class="keywords-loading" aria-live="polite">
+                    <div class="keywords-loading-spinner" role="status" aria-label="Loading header keywords"></div>
+                    <p class="muted">Loading header keywords…</p>
+                </div>
+                <ul id="header-keywords-list" class="data-list" style="display: none;"></ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const minHeaderKeywords = {{ min_header_keywords }};
+        const headerKeywordsList = document.getElementById("header-keywords-list");
+        const headerKeywordsLoading = document.getElementById("header-keywords-loading");
+        const headerKeywordsError = document.getElementById("header-keywords-error");
+        const headerKeywordAddForm = document.getElementById("header-keyword-add-form");
+        const headerKeywordAddInput = document.getElementById("header_keyword_add_input");
+        const headerKeywordsModal = document.getElementById("headerKeywordsModal");
+        const headerKeywordsApiBase = "{{ url_for('api_list_lc_etc_header_keywords') }}";
+
+        let headerKeywordsState = "idle";
+        let headerKeywords = [];
+
+        window.headerKeywordsAsync = {
+            isReady() {
+                return headerKeywordsState === "loaded";
+            },
+            getCount() {
+                return headerKeywords.length;
+            },
+            getMinRequired() {
+                return minHeaderKeywords;
+            },
+            onReady(callback) {
+                if (headerKeywordsState === "loaded") {
+                    callback(headerKeywords);
+                    return;
+                }
+                document.addEventListener("header-keywords-ready", () => callback(headerKeywords), { once: true });
+            },
+        };
+
+        function showHeaderKeywordsError(message) {
+            if (!headerKeywordsError) return;
+            if (!message) {
+                headerKeywordsError.style.display = "none";
+                headerKeywordsError.textContent = "";
+                return;
+            }
+            headerKeywordsError.textContent = message;
+            headerKeywordsError.style.display = "block";
+        }
+
+        function setKeywordsLoading(loading) {
+            if (headerKeywordsLoading) {
+                headerKeywordsLoading.style.display = loading ? "flex" : "none";
+            }
+            if (headerKeywordsList) {
+                headerKeywordsList.style.display = loading ? "none" : "";
+            }
+        }
+
+        function bindHeaderKeywordDeleteButtons(root) {
+            (root || document).querySelectorAll(".js-header-keyword-delete").forEach((button) => {
+                button.addEventListener("click", async () => {
+                    const keywordId = button.dataset.keywordId;
+                    const keywordText = button.dataset.keywordText || "this keyword";
+                    if (!keywordId) return;
+                    if (!window.confirm(`Delete keyword "${keywordText}"?`)) {
+                        return;
+                    }
+                    try {
+                        const response = await fetch(`${headerKeywordsApiBase}/${keywordId}`, {
+                            method: "DELETE",
+                        });
+                        const data = await response.json();
+                        if (!response.ok) {
+                            throw new Error(data.error || "Delete failed.");
+                        }
+                        showHeaderKeywordsError("");
+                        await loadHeaderKeywords({ showLoadingInModal: true });
+                    } catch (err) {
+                        showHeaderKeywordsError(err.message || "Delete failed.");
+                    }
+                });
+            });
+        }
+
+        function renderHeaderKeywordsList(keywords) {
+            if (!headerKeywordsList) return;
+            headerKeywordsList.innerHTML = "";
+            if (!keywords.length) {
+                const empty = document.createElement("li");
+                empty.className = "empty-state";
+                empty.innerHTML = "<p>No keywords found.</p>";
+                headerKeywordsList.appendChild(empty);
+                return;
+            }
+
+            keywords.forEach((item) => {
+                const li = document.createElement("li");
+                li.className = "data-row";
+                li.dataset.keywordId = String(item.id);
+
+                const nameSpan = document.createElement("span");
+                nameSpan.className = "data-name";
+                nameSpan.textContent = item.header_keywords;
+
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.className = "btn danger js-header-keyword-delete";
+                deleteBtn.textContent = "Delete";
+                deleteBtn.dataset.keywordId = String(item.id);
+                deleteBtn.dataset.keywordText = item.header_keywords;
+
+                const actions = document.createElement("div");
+                actions.className = "actions";
+                actions.style.margin = "0";
+                actions.append(deleteBtn);
+
+                li.append(nameSpan, actions);
+                headerKeywordsList.appendChild(li);
+            });
+            bindHeaderKeywordDeleteButtons(headerKeywordsList);
+        }
+
+        async function loadHeaderKeywords(options = {}) {
+            const showLoadingInModal = Boolean(options.showLoadingInModal);
+            const modalOpen = headerKeywordsModal && headerKeywordsModal.classList.contains("show");
+
+            if (showLoadingInModal || modalOpen || headerKeywordsState === "idle") {
+                setKeywordsLoading(true);
+            }
+
+            headerKeywordsState = "loading";
+            document.dispatchEvent(new CustomEvent("header-keywords-loading"));
+
+            try {
+                const response = await fetch(headerKeywordsApiBase);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load header keywords.");
+                }
+                headerKeywords = data.keywords || [];
+                headerKeywordsState = "loaded";
+                renderHeaderKeywordsList(headerKeywords);
+                setKeywordsLoading(false);
+                showHeaderKeywordsError("");
+                document.dispatchEvent(new CustomEvent("header-keywords-ready"));
+            } catch (err) {
+                headerKeywordsState = "error";
+                setKeywordsLoading(false);
+                showHeaderKeywordsError(err.message || "Could not load header keywords.");
+                document.dispatchEvent(new CustomEvent("header-keywords-error"));
+            }
+        }
+
+        if (headerKeywordAddForm) {
+            headerKeywordAddForm.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                const keyword = (headerKeywordAddInput?.value || "").trim();
+                if (!keyword) {
+                    showHeaderKeywordsError("Header keyword cannot be empty.");
+                    return;
+                }
+                try {
+                    const response = await fetch("{{ url_for('api_add_lc_etc_header_keyword') }}", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ header_keywords: keyword }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || "Add failed.");
+                    }
+                    if (headerKeywordAddInput) {
+                        headerKeywordAddInput.value = "";
+                    }
+                    showHeaderKeywordsError("");
+                    await loadHeaderKeywords({ showLoadingInModal: true });
+                } catch (err) {
+                    showHeaderKeywordsError(err.message || "Add failed.");
+                }
+            });
+        }
+
+        if (headerKeywordsModal) {
+            headerKeywordsModal.addEventListener("show.bs.modal", () => {
+                if (headerKeywordsState === "loading" || headerKeywordsState === "idle") {
+                    setKeywordsLoading(true);
+                } else if (headerKeywordsState === "loaded") {
+                    setKeywordsLoading(false);
+                }
+            });
+        }
+
+        loadHeaderKeywords();
+    })();
+</script>

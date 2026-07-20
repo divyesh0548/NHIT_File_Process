@@ -9,15 +9,17 @@
         <h1>Valid/Invalid Lookup</h1>
         <p>Upload source files and submit this process.</p>
     </div>
-    <div class="actions" style="margin-top: 0;">
-        <a class="btn secondary" href="{{ url_for('merge_valid_lookup_hub') }}">Back to {{ merge_valid_lookup_group_label }}</a>
-    </div>
 </section>
 
 {% if messages %}
     <div class="message-list">
         {% for message_type, message in messages %}
-            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">{{ message }}</div>
+            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">
+                {{ message }}
+                {% if message_type == 'success' and 'Process Management' in message %}
+                    <a href="{{ url_for('current_process') }}" style="margin-left: 6px;">Open Process Management</a>
+                {% endif %}
+            </div>
         {% endfor %}
     </div>
 {% endif %}
@@ -132,8 +134,8 @@
                         </div>
                         <div id="merged_upload_wrap" class="stack">
                             <label for="merged_life_cycle_input" class="muted">Merged Life Cycle file</label>
-                            <div class="actions" style="margin-top: 0;">
-                                <input id="merged_life_cycle_input" class="file-input" type="file" name="merged_life_cycle_file" accept=".xlsx,.csv,.xls" style="flex: 1 1 320px;">
+                            <div class="form-control-row">
+                                <input id="merged_life_cycle_input" class="file-input" type="file" name="merged_life_cycle_file" accept=".xlsx,.csv,.xls">
                             </div>
                         </div>
                         <div id="merged_import_wrap" class="stack" style="display: none;">
@@ -154,12 +156,12 @@
                     </div>
                     <div class="stack">
                         <label for="rates_input" class="muted">Rates</label>
-                        <div class="actions" style="margin-top: 0;">
-                            <input id="rates_input" class="file-input" type="file" name="rates_file" accept=".xlsx,.csv,.xls" style="flex: 1 1 320px;">
+                        <div class="form-control-row">
+                            <input id="rates_input" class="file-input" type="file" name="rates_file" accept=".xlsx,.csv,.xls">
                         </div>
                         <p class="muted">Supported file types: {{ allowed_extensions | join(', ') }}</p>
                     </div>
-                    <div class="actions" style="margin-top: 0;">
+                    <div class="form-control-row">
                         <button class="btn" type="submit" name="action" value="upload">Upload</button>
                     </div>
                     {% if not submit_ready %}

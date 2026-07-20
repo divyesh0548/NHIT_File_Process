@@ -8,21 +8,20 @@ from time import perf_counter
 
 import pandas as pd
 
+_PORTAL_ROOT = Path(__file__).resolve().parents[1] / "Portal"
+if str(_PORTAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PORTAL_ROOT))
+
+from header_matching import normalize_header_match
+
 INTERRUPT_EXIT_CODE = 130
 
 HEADER_SCAN_ROWS = 50
 FINAL_MERGE_CHUNK_ROWS = 100_000
 
 
-def _normalize_header_value(value):
-    if pd.isna(value):
-        return ""
-    return str(value).strip().lower()
-
-
 def _normalize_col_name(col):
-    s = str(col).strip().lower()
-    return "".join(s.split())
+    return normalize_header_match(col)
 
 
 def _detect_header_row_index(df_raw, header_keywords, min_matches=3):
@@ -30,12 +29,16 @@ def _detect_header_row_index(df_raw, header_keywords, min_matches=3):
     Detect the header row by scanning only a small sample from the top of the sheet.
     Returns 0 when no confident match is found.
     """
-    target = {_normalize_header_value(k) for k in header_keywords}
+    target = {normalize_header_match(k) for k in header_keywords if normalize_header_match(k)}
     best_idx = 0
     best_matches = 0
 
     for idx in range(len(df_raw)):
-        row_values = {_normalize_header_value(v) for v in df_raw.iloc[idx].tolist()}
+        row_values = {
+            normalize_header_match(v)
+            for v in df_raw.iloc[idx].tolist()
+            if normalize_header_match(v)
+        }
         match_count = len(target.intersection(row_values))
         if match_count > best_matches:
             best_matches = match_count
