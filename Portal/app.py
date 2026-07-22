@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import json
@@ -67,6 +68,22 @@ MERGE_REMOVE_DUP_LC_SLOT = "lc_etc"
 SEMI_FINAL_OUTPUT_FILENAME = "semi-final-output.csv"
 MERGE_REMOVE_DUP_ALLOWED_EXTENSIONS = {".csv"}
 
+FINAL_EXEMPT_SUBPROCESS_FOLDER = "Final_Exempt_Process"
+FINAL_EXEMPT_GROUP_LABEL = "Final Exempt Process"
+FINAL_EXEMPT_SEMI_SLOT = "semi"
+FINAL_EXEMPT_PASS_SLOT = "pass"
+FINAL_EXEMPT_INTERMEDIATE_FOLDER = "Intermediate_Files"
+FINAL_EXEMPT_CONFIG_FILENAME = "final_exempt_config.json"
+FINAL_EXEMPT_REQUIRED_SEMI_COLUMNS = {
+    "Veh Reg No.",
+    "Date & Time",
+    "MOP",
+    "Lane No",
+    "Description",
+    "TC Class",
+}
+FINAL_EXEMPT_PASS_ALLOWED_EXTENSIONS = {".xls", ".xlsx"}
+
 # Backward-compatible names used in process state and routing checks
 LIFE_CYCLE_PROCESS_FOLDER = LIFE_CYCLE_SUBPROCESS_FOLDER
 VALID_INVALID_PROCESS_FOLDER = VALID_INVALID_SUBPROCESS_FOLDER
@@ -120,6 +137,11 @@ migrate_valid_invalid_parent_folder()
     FILE_PROCESS_DIR
     / EXEMPT_QUERY_PARENT_FOLDER
     / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+).mkdir(parents=True, exist_ok=True)
+(
+    FILE_PROCESS_DIR
+    / EXEMPT_QUERY_PARENT_FOLDER
+    / FINAL_EXEMPT_SUBPROCESS_FOLDER
 ).mkdir(parents=True, exist_ok=True)
 
 def valid_invalid_parent_dir():
@@ -211,6 +233,15 @@ def list_available_processes():
                         MERGE_REMOVE_DUP_GROUP_LABEL,
                         proc_dir,
                     )
+        final_exempt_root = exempt_dir / FINAL_EXEMPT_SUBPROCESS_FOLDER
+        if final_exempt_root.is_dir():
+            for proc_dir in sorted(final_exempt_root.iterdir(), key=lambda p: p.name.lower()):
+                if proc_dir.is_dir() and not proc_dir.name.startswith("."):
+                    add_item(
+                        EXEMPT_QUERY_GROUP_LABEL,
+                        FINAL_EXEMPT_GROUP_LABEL,
+                        proc_dir,
+                    )
 
     return sorted(
         items,
@@ -253,6 +284,16 @@ merge_remove_dup_state_lock = threading.Lock()
 merge_remove_dup_state = {
     "running": False,
     "process_type": MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+    "process_name": "",
+    "started_at": None,
+    "finished_at": None,
+    "last_status": "",
+}
+
+final_exempt_state_lock = threading.Lock()
+final_exempt_state = {
+    "running": False,
+    "process_type": FINAL_EXEMPT_SUBPROCESS_FOLDER,
     "process_name": "",
     "started_at": None,
     "finished_at": None,
@@ -356,6 +397,148 @@ def ensure_merge_remove_dup_dirs(process_name):
     lc_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     return process_dir, vrn_dir, lc_dir, output_dir
+
+
+def get_final_exempt_paths(process_name):
+    """
+    File_Process/Exempt_Query/Final_Exempt_Process/<process_name>/
+      input/semi/  input/pass/  Intermediate_Files/  output/
+    """
+    safe_process_name = secure_filename((process_name or "").strip())
+    if not safe_process_name:
+        return None, None, None, None, None
+    process_dir = (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / FINAL_EXEMPT_SUBPROCESS_FOLDER
+        / safe_process_name
+    )
+    input_dir = process_dir / "input"
+    return (
+        process_dir,
+        input_dir / FINAL_EXEMPT_SEMI_SLOT,
+        input_dir / FINAL_EXEMPT_PASS_SLOT,
+        process_dir / FINAL_EXEMPT_INTERMEDIATE_FOLDER,
+        process_dir / "output",
+    )
+
+
+def ensure_final_exempt_dirs(process_name):
+    process_dir, semi_dir, pass_dir, work_dir, output_dir = get_final_exempt_paths(process_name)
+    if not process_dir:
+        return None, None, None, None, None
+    for directory in (semi_dir, pass_dir, work_dir, output_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    return process_dir, semi_dir, pass_dir, work_dir, output_dir
+
+
+def get_final_exempt_semi_file(process_name):
+    _, semi_dir, _, _, _ = get_final_exempt_paths(process_name)
+    if not semi_dir or not semi_dir.is_dir():
+        return None
+    files = sorted((p for p in semi_dir.iterdir() if p.is_file() and p.suffix.lower() == ".csv"), key=lambda p: p.name.lower())
+    return files[0] if files else None
+
+
+def list_final_exempt_pass_files(process_name):
+    _, _, pass_dir, _, _ = get_final_exempt_paths(process_name)
+    if not pass_dir or not pass_dir.is_dir():
+        return []
+    return sorted((p.name for p in pass_dir.iterdir() if p.is_file()), key=str.lower)
+
+
+def get_final_exempt_config_path(process_name):
+    process_dir, _, _, _, _ = get_final_exempt_paths(process_name)
+    return process_dir / FINAL_EXEMPT_CONFIG_FILENAME if process_dir else None
+
+
+def load_final_exempt_config(process_name):
+    config_path = get_final_exempt_config_path(process_name)
+    if not config_path or not config_path.is_file():
+        return {}
+    try:
+        value = json.loads(config_path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_final_exempt_config(process_name, plaza_name, output_file_name):
+    config_path = get_final_exempt_config_path(process_name)
+    if not config_path:
+        return False
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {"plaza_name": plaza_name, "output_file_name": output_file_name},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return True
+
+
+def allowed_final_exempt_pass_file(filename):
+    return Path(filename).suffix.lower() in FINAL_EXEMPT_PASS_ALLOWED_EXTENSIONS
+
+
+def final_exempt_output_file_name(process_name, requested_name=""):
+    name = secure_filename((requested_name or "").strip())
+    if not name:
+        name = f"{secure_filename(process_name)}_final.xlsx"
+    if Path(name).suffix.lower() != ".xlsx":
+        name = f"{Path(name).stem}.xlsx"
+    return name
+
+
+def list_merge_remove_dup_output_files():
+    root = FILE_PROCESS_DIR / EXEMPT_QUERY_PARENT_FOLDER / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+    if not root.is_dir():
+        return []
+    results = []
+    for process_dir in sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name.lower()):
+        candidate = process_dir / "output" / SEMI_FINAL_OUTPUT_FILENAME
+        if candidate.is_file():
+            results.append(
+                {
+                    "relative_path": candidate.relative_to(FILE_PROCESS_DIR.resolve()).as_posix(),
+                    "label": f"{process_dir.name} / output / {SEMI_FINAL_OUTPUT_FILENAME}",
+                }
+            )
+    return results
+
+
+def resolve_merge_remove_dup_output_import(relative_path):
+    target = safe_path_from_relative(relative_path)
+    if not target or not target.is_file() or target.name != SEMI_FINAL_OUTPUT_FILENAME:
+        return None
+    try:
+        parts = target.relative_to(FILE_PROCESS_DIR.resolve()).parts
+    except ValueError:
+        return None
+    if (
+        len(parts) != 5
+        or parts[0] != EXEMPT_QUERY_PARENT_FOLDER
+        or parts[1] != MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        or parts[3] != "output"
+    ):
+        return None
+    return target
+
+
+def get_final_exempt_plazas():
+    codes_path = (
+        Path(__file__).resolve().parent
+        / "Scripts"
+        / "Excempy_Query"
+        / "Final_7_scripts"
+        / "codes_dump.json"
+    )
+    try:
+        codes = json.loads(codes_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    return sorted(str(name).strip() for name in codes if str(name).strip())
 
 
 def allowed_merge_remove_dup_file(filename):
@@ -1064,6 +1247,8 @@ def annotate_process_button_state(
     merge_normalize_file_kind="",
     merge_remove_dup_running=False,
     merge_remove_dup_process_name="",
+    final_exempt_running=False,
+    final_exempt_process_name="",
 ):
     annotated_entries = []
     for entry in entries:
@@ -1084,6 +1269,7 @@ def annotate_process_button_state(
             exempt_subprocesses = {
                 MERGE_NORMALIZE_SUBPROCESS_FOLDER,
                 MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+                FINAL_EXEMPT_SUBPROCESS_FOLDER,
             }
             if parent_folder and parent_folder not in supported_groups:
                 process_disabled = True
@@ -1098,7 +1284,7 @@ def annotate_process_button_state(
                 process_disabled = True
                 process_disabled_message = (
                     "Processing from the directory browser is only available for "
-                    f"Exempt Query → {MERGE_NORMALIZE_GROUP_LABEL} and {MERGE_REMOVE_DUP_GROUP_LABEL}."
+                    f"Exempt Query → {MERGE_NORMALIZE_GROUP_LABEL}, {MERGE_REMOVE_DUP_GROUP_LABEL}, and {FINAL_EXEMPT_GROUP_LABEL}."
                 )
             elif (
                 life_cycle_running
@@ -1138,6 +1324,16 @@ def annotate_process_button_state(
                 process_disabled = True
                 process_disabled_message = (
                     f"Process is disabled while {MERGE_REMOVE_DUP_GROUP_LABEL} "
+                    f"is already running for '{process_name}'."
+                )
+            elif (
+                final_exempt_running
+                and process_type == FINAL_EXEMPT_SUBPROCESS_FOLDER
+                and process_name == final_exempt_process_name
+            ):
+                process_disabled = True
+                process_disabled_message = (
+                    f"Process is disabled while {FINAL_EXEMPT_GROUP_LABEL} "
                     f"is already running for '{process_name}'."
                 )
 
@@ -1404,6 +1600,254 @@ def run_merge_remove_dup_in_background(process_name):
         merge_remove_dup_state["last_status"] = process_message if ok else f"FAILED: {process_message}"
 
 
+def _set_final_exempt_progress(message):
+    with final_exempt_state_lock:
+        if final_exempt_state["running"]:
+            final_exempt_state["last_status"] = message
+
+
+def _format_final_exempt_subprocess_error(stage_name, result):
+    detail = (result.stderr or result.stdout or "").strip()
+    if detail:
+        detail = detail[-2000:]
+        return f"{stage_name} failed with exit code {result.returncode}. Details: {detail}"
+    return f"{stage_name} failed with exit code {result.returncode}."
+
+
+def _validate_final_exempt_semi_file(semi_file):
+    try:
+        headers = pd.read_csv(semi_file, nrows=0).columns
+    except Exception as exc:
+        return False, f"Could not read the semi-final CSV: {exc}"
+    normalized_headers = {
+        str(header).replace("\ufeff", "").strip()
+        for header in headers
+    }
+    missing = sorted(FINAL_EXEMPT_REQUIRED_SEMI_COLUMNS - normalized_headers)
+    if missing:
+        return (
+            False,
+            "Semi-final CSV is missing required column(s): " + ", ".join(missing),
+        )
+    return True, ""
+
+
+def _run_final_exempt_script(script_dir, script_name, stage_name, env, expected_files=()):
+    _set_final_exempt_progress(stage_name)
+    try:
+        result = subprocess.run(
+            [sys.executable, script_name],
+            cwd=str(script_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:
+        return False, f"{stage_name} could not start: {exc}"
+    if result.returncode != 0:
+        return False, _format_final_exempt_subprocess_error(stage_name, result)
+    missing = [Path(path).name for path in expected_files if not Path(path).is_file()]
+    if missing:
+        return False, f"{stage_name} completed but did not create: {', '.join(missing)}."
+    return True, ""
+
+
+def process_final_exempt_files(process_name):
+    if is_reserved_process_name(process_name):
+        return False, "Please provide a valid process name."
+
+    process_dir, semi_dir, pass_dir, work_dir, output_dir = ensure_final_exempt_dirs(process_name)
+    if not process_dir:
+        return False, "Please provide a valid process name."
+    semi_file = get_final_exempt_semi_file(process_name)
+    pass_files = [
+        path for path in pass_dir.iterdir()
+        if path.is_file() and allowed_final_exempt_pass_file(path.name)
+    ]
+    if not semi_file:
+        return False, "A semi-final CSV is required. Upload one or import a Merge + Remove Duplicate output."
+    if not pass_files:
+        return False, "Upload at least one .xls or .xlsx pass file before starting."
+
+    valid_semi, semi_error = _validate_final_exempt_semi_file(semi_file)
+    if not valid_semi:
+        return False, semi_error
+
+    process_config = load_final_exempt_config(process_name)
+    plaza_name = str(process_config.get("plaza_name") or "").strip()
+    output_file_name = final_exempt_output_file_name(
+        process_name, process_config.get("output_file_name")
+    )
+    if not plaza_name:
+        return False, "Select a plaza before starting the Final Exempt Process."
+    if plaza_name not in get_final_exempt_plazas():
+        return False, "Selected plaza is not available in codes_dump.json. Save the process again with a valid plaza."
+
+    script_dir = (
+        Path(__file__).resolve().parent
+        / "Scripts"
+        / "Excempy_Query"
+        / "Final_7_scripts"
+    )
+    required_scripts = (
+        "Pass_file_seperator.py",
+        "main_script.py",
+        "RF3_condition.py",
+        "combined_with_rf3.py",
+        "Date_validity_check.py",
+        "Date_validity_check_LT.py",
+        "Return_Journey_Logic.py",
+    )
+    missing_scripts = [name for name in required_scripts if not (script_dir / name).is_file()]
+    if missing_scripts:
+        return False, "Required final-stage script(s) not found: " + ", ".join(missing_scripts)
+    codes_source = script_dir / "codes_dump.json"
+    if not codes_source.is_file():
+        return False, "codes_dump.json was not found with the final-stage scripts."
+
+    # A re-run must not accidentally consume stale LT or intermediary files from
+    # an earlier attempt. Original user inputs remain untouched under input/.
+    try:
+        if work_dir.exists():
+            shutil.rmtree(work_dir)
+        work_input = work_dir / "input"
+        work_pass_raw = work_dir / "pass_raw"
+        work_output = work_dir / "output"
+        for directory in (work_input, work_pass_raw, work_output):
+            directory.mkdir(parents=True, exist_ok=True)
+        runtime_semi = work_input / "semi_final_output.csv"
+        shutil.copy2(semi_file, runtime_semi)
+        shutil.copy2(codes_source, work_input / "codes_dump.json")
+        for pass_file in pass_files:
+            shutil.copy2(pass_file, work_pass_raw / pass_file.name)
+    except OSError as exc:
+        return False, f"Could not prepare the per-run {FINAL_EXEMPT_INTERMEDIATE_FOLDER} folder: {exc}"
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PYTHONUNBUFFERED": "1",
+            "EXEMPT_FINAL_WORK_DIR": str(work_dir.resolve()),
+            "EXEMPT_FINAL_INPUT_DIR": str(work_input.resolve()),
+            "EXEMPT_FINAL_OUTPUT_DIR": str(work_output.resolve()),
+            "EXEMPT_FINAL_SEMI_CSV_NAME": runtime_semi.name,
+            "EXEMPT_FINAL_OUTPUT_FILE_NAME": output_file_name,
+            "EXEMPT_FINAL_PLAZA": plaza_name,
+            "EXEMPT_FINAL_CODES_FILE": str((work_input / "codes_dump.json").resolve()),
+            "EXEMPT_FINAL_PASS_INPUT": str(work_pass_raw.resolve()),
+            "EXEMPT_FINAL_PASS_OUTPUT": str(work_input.resolve()),
+        }
+    )
+
+    ok, error = _run_final_exempt_script(
+        script_dir,
+        "Pass_file_seperator.py",
+        "Step 1: separating MP and LT pass files.",
+        env,
+        expected_files=(work_input / "MP_Pass.xlsx", work_input / "LT_Pass.xlsx"),
+    )
+    if not ok:
+        return False, error
+
+    summary_path = work_input / "pass_separator_summary.json"
+    try:
+        pass_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return False, "Pass separation did not produce its validation summary."
+    if not pass_summary.get("pass_type_detected"):
+        return False, "No Pass Type column was found in the uploaded pass files. Use a supported pass report and try again."
+    if not pass_summary.get("mp_rows"):
+        return False, "Pass separation found 0 MP rows. MP passes are required for this process."
+    has_lt = bool(pass_summary.get("lt_rows"))
+    env["EXEMPT_FINAL_RETURN_INPUT"] = "LT_output.xlsx" if has_lt else "MP Output.xlsx"
+
+    stage_plan = [
+        (
+            "main_script.py",
+            "Step 2: detecting exempt exceptions.",
+            (work_output / "updated_new_Combined_Side_Results.xlsx",),
+        ),
+        (
+            "RF3_condition.py",
+            "Step 3: calculating RF3 conditions.",
+            (
+                work_output / "RF3 Pivot.xlsx",
+                work_output / "rf3_1.xlsx",
+                work_output / "rf3_2.xlsx",
+            ),
+        ),
+        (
+            "combined_with_rf3.py",
+            "Step 4: combining exceptions and RF3 results.",
+            (work_output / "combined_with_rf3.xlsx",),
+        ),
+        (
+            "Date_validity_check.py",
+            "Step 5: checking MP pass validity.",
+            (work_output / "MP Output.xlsx",),
+        ),
+    ]
+    if has_lt:
+        stage_plan.append(
+            (
+                "Date_validity_check_LT.py",
+                "Step 6: checking LT pass validity.",
+                (work_output / "LT_output.xlsx",),
+            )
+        )
+    stage_plan.append(
+        (
+            "Return_Journey_Logic.py",
+            "Final step: applying return-journey logic.",
+            (work_output / output_file_name,),
+        )
+    )
+
+    for script_name, stage_name, expected_files in stage_plan:
+        ok, error = _run_final_exempt_script(
+            script_dir, script_name, stage_name, env, expected_files=expected_files
+        )
+        if not ok:
+            return False, error
+
+    final_workbook = work_output / output_file_name
+    final_destination = output_dir / output_file_name
+    try:
+        shutil.copy2(final_workbook, final_destination)
+    except OSError as exc:
+        return False, f"Final workbook was created but could not be copied to output: {exc}"
+
+    other_count = int(pass_summary.get("other_rows") or 0)
+    other_note = (
+        f" {other_count} Other pass row(s) kept in "
+        f"{FINAL_EXEMPT_INTERMEDIATE_FOLDER}/input for debugging."
+        if other_count
+        else ""
+    )
+    return (
+        True,
+        f"{FINAL_EXEMPT_GROUP_LABEL} finished for '{process_dir.name}'. "
+        f"Output: output/{output_file_name}." + other_note,
+    )
+
+
+def run_final_exempt_in_background(process_name):
+    with final_exempt_state_lock:
+        final_exempt_state["running"] = True
+        final_exempt_state["process_type"] = FINAL_EXEMPT_SUBPROCESS_FOLDER
+        final_exempt_state["process_name"] = process_name
+        final_exempt_state["started_at"] = time.time()
+        final_exempt_state["finished_at"] = None
+        final_exempt_state["last_status"] = "Preparing Final Exempt Process."
+
+    ok, process_message = process_final_exempt_files(process_name)
+
+    with final_exempt_state_lock:
+        final_exempt_state["running"] = False
+        final_exempt_state["finished_at"] = time.time()
+        final_exempt_state["last_status"] = process_message if ok else f"FAILED: {process_message}"
+
+
 @app.route("/life-cycle-merge-status")
 def life_cycle_merge_status():
     with life_cycle_state_lock:
@@ -1438,6 +1882,17 @@ def merge_remove_dup_status():
     return jsonify(state)
 
 
+@app.route("/final-exempt-status")
+def final_exempt_status():
+    with final_exempt_state_lock:
+        state = dict(final_exempt_state)
+    if state["started_at"]:
+        state["elapsed_seconds"] = int(time.time() - state["started_at"])
+    else:
+        state["elapsed_seconds"] = 0
+    return jsonify(state)
+
+
 @app.route("/valid-invalid-status")
 def valid_invalid_status():
     with valid_invalid_state_lock:
@@ -1459,6 +1914,7 @@ def inject_process_labels():
         "merge_valid_lookup_parent_folder": VALID_INVALID_PARENT_FOLDER,
         "merge_normalize_group_label": MERGE_NORMALIZE_GROUP_LABEL,
         "merge_remove_dup_group_label": MERGE_REMOVE_DUP_GROUP_LABEL,
+        "final_exempt_group_label": FINAL_EXEMPT_GROUP_LABEL,
         "exempt_query_parent_folder": EXEMPT_QUERY_PARENT_FOLDER,
         "merge_normalize_file_kind_labels": MERGE_NORMALIZE_FILE_KIND_LABELS,
     }
@@ -1481,6 +1937,7 @@ def exempt_query_hub():
         exempt_query_folder=EXEMPT_QUERY_PARENT_FOLDER,
         merge_normalize_folder=MERGE_NORMALIZE_SUBPROCESS_FOLDER,
         merge_remove_dup_folder=MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+        final_exempt_folder=FINAL_EXEMPT_SUBPROCESS_FOLDER,
     )
 
 
@@ -1494,6 +1951,8 @@ def current_process():
         current_merge_normalize_state = dict(merge_normalize_state)
     with merge_remove_dup_state_lock:
         current_merge_remove_dup_state = dict(merge_remove_dup_state)
+    with final_exempt_state_lock:
+        current_final_exempt_state = dict(final_exempt_state)
     return render_template(
         "current_process.html",
         available_processes=list_available_processes(),
@@ -1501,6 +1960,7 @@ def current_process():
         valid_invalid_state=current_valid_invalid_state,
         merge_normalize_state=current_merge_normalize_state,
         merge_remove_dup_state=current_merge_remove_dup_state,
+        final_exempt_state=current_final_exempt_state,
     )
 
 
@@ -1591,12 +2051,16 @@ def file_process_directories():
     with merge_remove_dup_state_lock:
         merge_remove_dup_running = merge_remove_dup_state["running"]
         merge_remove_dup_process_name = merge_remove_dup_state["process_name"]
+    with final_exempt_state_lock:
+        final_exempt_running = final_exempt_state["running"]
+        final_exempt_process_name = final_exempt_state["process_name"]
 
     delete_disabled = (
         life_cycle_running
         or valid_invalid_running
         or merge_normalize_running
         or merge_remove_dup_running
+        or final_exempt_running
     )
     delete_disabled_message = ""
     if life_cycle_running:
@@ -1618,6 +2082,11 @@ def file_process_directories():
             f"Delete is disabled while {MERGE_REMOVE_DUP_GROUP_LABEL} "
             f"is running for '{merge_remove_dup_process_name}'."
         )
+    elif final_exempt_running:
+        delete_disabled_message = (
+            f"Delete is disabled while {FINAL_EXEMPT_GROUP_LABEL} "
+            f"is running for '{final_exempt_process_name}'."
+        )
 
     def _annotate(entries):
         return annotate_process_button_state(
@@ -1631,6 +2100,8 @@ def file_process_directories():
             merge_normalize_file_kind,
             merge_remove_dup_running,
             merge_remove_dup_process_name,
+            final_exempt_running,
+            final_exempt_process_name,
         )
 
     if request.method == "POST":
@@ -1683,6 +2154,9 @@ def file_process_directories():
                 with merge_remove_dup_state_lock:
                     mrd_running = merge_remove_dup_state["running"]
                     mrd_process_name = merge_remove_dup_state["process_name"]
+                with final_exempt_state_lock:
+                    fe_running = final_exempt_state["running"]
+                    fe_process_name = final_exempt_state["process_name"]
 
                 running_process_dir = None
                 if running and running_process_name:
@@ -1706,6 +2180,13 @@ def file_process_directories():
                 )
                 if mrd_process_dir:
                     mrd_process_dir = mrd_process_dir.resolve()
+                fe_process_dir = (
+                    get_final_exempt_paths(fe_process_name)[0]
+                    if fe_running and fe_process_name
+                    else None
+                )
+                if fe_process_dir:
+                    fe_process_dir = fe_process_dir.resolve()
 
                 if (
                     running_process_dir
@@ -1735,6 +2216,16 @@ def file_process_directories():
                         (
                             "error",
                             f"Cannot delete '{mrd_process_name}' while {MERGE_REMOVE_DUP_GROUP_LABEL} is running.",
+                        )
+                    )
+                elif (
+                    fe_process_dir
+                    and (target_path == fe_process_dir or fe_process_dir in target_path.parents)
+                ):
+                    messages.append(
+                        (
+                            "error",
+                            f"Cannot delete '{fe_process_name}' while {FINAL_EXEMPT_GROUP_LABEL} is running.",
                         )
                     )
                 else:
@@ -1873,12 +2364,40 @@ def file_process_directories():
                                 ),
                             )
                         )
+                elif (
+                    parent_folder == EXEMPT_QUERY_PARENT_FOLDER
+                    and process_type == FINAL_EXEMPT_SUBPROCESS_FOLDER
+                ):
+                    with final_exempt_state_lock:
+                        running = final_exempt_state["running"]
+                    if running:
+                        messages.append(
+                            (
+                                "error",
+                                f"A {FINAL_EXEMPT_GROUP_LABEL} is already running. Please wait for it to finish.",
+                            )
+                        )
+                    else:
+                        worker = threading.Thread(
+                            target=run_final_exempt_in_background,
+                            args=(process_name,),
+                            daemon=True,
+                        )
+                        worker.start()
+                        messages.append(
+                            (
+                                "success",
+                                process_started_success_message(
+                                    FINAL_EXEMPT_GROUP_LABEL, process_name
+                                ),
+                            )
+                        )
                 elif parent_folder == EXEMPT_QUERY_PARENT_FOLDER:
                     messages.append(
                         (
                             "error",
                             f"Exempt Query processing from Directories is only available for "
-                            f"{MERGE_NORMALIZE_GROUP_LABEL} and {MERGE_REMOVE_DUP_GROUP_LABEL}.",
+                            f"{MERGE_NORMALIZE_GROUP_LABEL}, {MERGE_REMOVE_DUP_GROUP_LABEL}, and {FINAL_EXEMPT_GROUP_LABEL}.",
                         )
                     )
                 elif not is_valid_invalid_parent_folder(parent_folder):
@@ -2396,6 +2915,163 @@ def merge_remove_duplicate():
         submit_ready=submit_ready,
         semi_final_output_filename=SEMI_FINAL_OUTPUT_FILENAME,
         merge_normalize_output_filename=MERGE_NORMALIZE_OUTPUT_FILENAME,
+    )
+
+
+@app.route("/final-exempt-process", methods=["GET", "POST"])
+def final_exempt_process():
+    messages = []
+    reset_form_after_submit = False
+    current_process_name = (
+        request.form.get("process_name", "").strip() if request.method == "POST" else ""
+    )
+    semi_outputs = list_merge_remove_dup_output_files()
+
+    if request.method == "POST":
+        action = request.form.get("action", "").strip()
+        if current_process_name and is_reserved_process_name(current_process_name):
+            messages.append(("error", "Choose a valid process name (not a reserved folder name)."))
+        elif action == "apply":
+            plaza_name = request.form.get("plaza_name", "").strip()
+            output_file_name = final_exempt_output_file_name(
+                current_process_name, request.form.get("output_file_name", "")
+            )
+            if not current_process_name:
+                messages.append(("error", "Process name is required before applying inputs."))
+            elif plaza_name not in get_final_exempt_plazas():
+                messages.append(("error", "Select a plaza from the available list before applying inputs."))
+            else:
+                _, semi_dir, pass_dir, _, _ = ensure_final_exempt_dirs(current_process_name)
+                save_final_exempt_config(current_process_name, plaza_name, output_file_name)
+                messages.append(("success", "Process settings saved."))
+
+                semi_source = request.form.get("semi_source", "upload").strip()
+                if semi_source == "import":
+                    imported_semi = resolve_merge_remove_dup_output_import(
+                        request.form.get("semi_import", "").strip()
+                    )
+                    if not imported_semi:
+                        messages.append(
+                            (
+                                "error",
+                                "Select a valid semi-final output from Merge + Remove Duplicate.",
+                            )
+                        )
+                    else:
+                        for existing in semi_dir.iterdir():
+                            if existing.is_file():
+                                existing.unlink()
+                        shutil.copy2(imported_semi, semi_dir / SEMI_FINAL_OUTPUT_FILENAME)
+                        messages.append(("success", f"Imported semi-final file from {imported_semi.parent.parent.name}."))
+                else:
+                    semi_upload = request.files.get("semi_file")
+                    if semi_upload and semi_upload.filename:
+                        filename = secure_filename(semi_upload.filename)
+                        if Path(filename).suffix.lower() != ".csv":
+                            messages.append(("error", "Semi-final file must be a .csv."))
+                        else:
+                            for existing in semi_dir.iterdir():
+                                if existing.is_file():
+                                    existing.unlink()
+                            semi_upload.save(semi_dir / filename)
+                            messages.append(("success", f"Uploaded semi-final file: {filename}"))
+
+                uploaded_pass_count = 0
+                for pass_upload in request.files.getlist("pass_files"):
+                    if not pass_upload or not pass_upload.filename:
+                        continue
+                    filename = secure_filename(pass_upload.filename)
+                    if not allowed_final_exempt_pass_file(filename):
+                        messages.append(("error", f"Pass file must be .xls or .xlsx: {filename or 'unnamed file'}"))
+                        continue
+                    destination = pass_dir / filename
+                    suffix = 2
+                    while destination.exists():
+                        destination = pass_dir / f"{Path(filename).stem}_{suffix}{Path(filename).suffix}"
+                        suffix += 1
+                    pass_upload.save(destination)
+                    uploaded_pass_count += 1
+                if uploaded_pass_count:
+                    messages.append(("success", f"Uploaded {uploaded_pass_count} pass file(s)."))
+
+        elif action == "delete":
+            slot = request.form.get("slot", "").strip()
+            filename = secure_filename(request.form.get("filename", ""))
+            if not current_process_name or not filename:
+                messages.append(("error", "A process name and filename are required before delete."))
+            else:
+                _, semi_dir, pass_dir, _, _ = get_final_exempt_paths(current_process_name)
+                folder = semi_dir if slot == FINAL_EXEMPT_SEMI_SLOT else pass_dir if slot == FINAL_EXEMPT_PASS_SLOT else None
+                target = folder / filename if folder else None
+                if target and target.is_file():
+                    try:
+                        target.unlink()
+                        messages.append(("success", f"Deleted file: {filename}"))
+                    except OSError as exc:
+                        messages.append(("error", f"Delete failed: {exc}"))
+                else:
+                    messages.append(("error", "Selected input file was not found."))
+
+        elif action == "process":
+            process_config = load_final_exempt_config(current_process_name)
+            semi_file = get_final_exempt_semi_file(current_process_name)
+            pass_files = list_final_exempt_pass_files(current_process_name)
+            if not current_process_name:
+                messages.append(("error", "Process name is required before starting."))
+            elif not process_config.get("plaza_name"):
+                messages.append(("error", "Apply the process settings, including plaza, before starting."))
+            elif not semi_file:
+                messages.append(("error", "Attach a semi-final CSV before starting."))
+            elif not pass_files:
+                messages.append(("error", "Attach at least one pass file before starting."))
+            else:
+                with final_exempt_state_lock:
+                    running = final_exempt_state["running"]
+                if running:
+                    messages.append(
+                        (
+                            "error",
+                            f"A {FINAL_EXEMPT_GROUP_LABEL} is already running. Please wait for it to finish.",
+                        )
+                    )
+                else:
+                    worker = threading.Thread(
+                        target=run_final_exempt_in_background,
+                        args=(current_process_name,),
+                        daemon=True,
+                    )
+                    worker.start()
+                    messages.append(
+                        (
+                            "success",
+                            process_started_success_message(
+                                FINAL_EXEMPT_GROUP_LABEL, current_process_name
+                            ),
+                        )
+                    )
+                    reset_form_after_submit = True
+                    current_process_name = ""
+
+    process_config = load_final_exempt_config(current_process_name) if current_process_name else {}
+    semi_file = get_final_exempt_semi_file(current_process_name) if current_process_name else None
+    pass_files = list_final_exempt_pass_files(current_process_name) if current_process_name else []
+    submit_ready = bool(
+        current_process_name
+        and semi_file
+        and pass_files
+        and process_config.get("plaza_name")
+    )
+    return render_template(
+        "final_exempt_process.html",
+        current_process_name=current_process_name,
+        process_config=process_config,
+        semi_file=semi_file.name if semi_file else "",
+        pass_files=pass_files,
+        semi_outputs=semi_outputs,
+        plazas=get_final_exempt_plazas(),
+        messages=messages,
+        submit_ready=submit_ready,
+        reset_form_after_submit=reset_form_after_submit,
     )
 
 

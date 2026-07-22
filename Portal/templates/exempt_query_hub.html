@@ -30,8 +30,15 @@
         </div>
     </article>
     <article class="card">
+        <h3 class="card-title">{{ final_exempt_group_label }}</h3>
+        <p>Import or upload the deduplicated semi-final CSV, upload mixed pass reports, and produce the final exempt-query Excel workbook.</p>
+        <div class="actions">
+            <a class="btn" href="{{ url_for('final_exempt_process') }}">Open</a>
+        </div>
+    </article>
+    <article class="card">
         <h3 class="card-title">Browse Folders</h3>
-        <p>Open the Exempt Query tree, including <code>{{ merge_normalize_folder }}</code> and <code>{{ merge_remove_dup_folder }}</code>.</p>
+        <p>Open the Exempt Query tree, including <code>{{ merge_normalize_folder }}</code>, <code>{{ merge_remove_dup_folder }}</code>, and <code>{{ final_exempt_folder }}</code>.</p>
         <div class="actions">
             <a class="btn secondary" href="{{ url_for('file_process_directories', path=exempt_query_folder) }}">Open in Directory Browser</a>
         </div>

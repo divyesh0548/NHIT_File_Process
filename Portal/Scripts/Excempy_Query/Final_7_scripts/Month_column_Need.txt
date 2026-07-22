@@ -1,0 +1,17 @@
+What the month column actually does in Power BI
+In Steps.txt, Month Name is only a temporary filter helper:
+
+LC query — add month → keep October + SETTLED → output 4 columns with MOP = "ETC"
+VRN query — add month → keep October → append LC → dedupe → drop Month Name
+So Month Name is never part of the final output. It exists only to slice one month at a time in Power BI.
+
+The real logic is:
+
+Append LC into VRN (same month in the old workflow)
+Build Merged = Veh Reg No. + Date & Time (en-IN) + MOP
+Remove duplicates on Merged
+Normalize Description and MOP
+Is the month filter required for correct dedupe?
+No — not for deduplication itself.
+
+The dedupe key does not include month. It uses the full Date & Time, so two rows are duplicates only if vehicle, exact timestamp, and MOP all match.

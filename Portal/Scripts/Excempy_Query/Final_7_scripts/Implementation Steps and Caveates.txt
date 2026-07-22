@@ -1,0 +1,151 @@
+What this stage actually is
+End-to-end Exempt Query today:
+
+Merge + Normalize (VRN / LC)
+Merge + Remove Duplicate → semi-final-output.csv
+This stage — pass split + 5–6 processing scripts → final Excel
+The orchestrator in import subprocess.py lists 8 entries, but config.py and data_processing.py are support modules, not real steps. Real work is:
+
+Step	Script	Needs
+1	main_script.py	Semi CSV
+2	RF3_condition.py	Semi CSV
+3	combined_with_rf3.py	Prior outputs + codes_dump.json + plaza
+4	Date_validity_check.py	MP_Pass.xlsx
+5 (optional)	Date_validity_check_LT.py	LT_Pass.xlsx
+6	Return_Journey_Logic.py	MP Output.xlsx or LT_output.xlsx
+Pass_file_seperator.py should run before steps 4–5: mixed pass uploads → MP_Pass.xlsx / LT_Pass.xlsx (names config.py already expects).
+
+Suggested portal implementation
+Mirror Merge + Remove Duplicate: one process name, slots, background job, Process Management status.
+
+Folder layout
+File_Process/Exempt_Query/Final_Exempt_Process/<process_name>/
+  input/
+    semi/          ← semi-final CSV (upload or import from Merge+Remove Duplicate)
+    pass/          ← raw pass Excel(s), mixed MP/LT/other
+  Intermediate_Files/  ← Pass_file_seperator output + script intermediates
+    MP_Pass.xlsx
+    LT_Pass.xlsx   ← only if LT rows exist
+    Other_Pass.xlsx
+    … intermediates …
+  output/
+    <final>.xlsx
+
+
+
+
+
+UI (Exempt Query hub card) ---> Inputs to be taken from user in form
+Process name
+Plaza — dropdown from codes_dump.json keys (required for Local/Non-Local)
+Semi-final file — upload CSV or import semi-final-output.csv from Merge + Remove Duplicate (same pattern as VRN/LC import)
+Pass files — multi-upload .xls/.xlsx
+Final output name (optional, default {process_name}_final.xlsx)
+Submit → Process Management
+Do not ask the user to pick MP vs LT; run the separator and decide from result.
+
+Backend pipeline (one background worker)
+1. Validate semi CSV columns (Veh Reg No., Date & Time, MOP, Lane No, Description, TC Class)
+2. Copy semi → Intermediate_Files/input as fixed name (e.g. semi_final_output.csv)
+3. Copy pass files → Intermediate_Files/pass_raw/
+4. Run Pass_file_seperator (INPUT=pass_raw, OUTPUT=Intermediate_Files/)
+5. Build run plan:
+     always: main → RF3 → combined → Date_validity_MP
+     if LT_Pass.xlsx exists and has rows: Date_validity_LT
+     else: skip LT
+6. Set return_journey input:
+     LT ran  → LT_output.xlsx
+     else    → MP Output.xlsx
+7. Run Return_Journey_Logic → copy final to output/
+8. Fail fast on non-zero exit; surface stderr in Process Management
+Config injection (important)
+Do not edit config.py on disk. Portal should set env vars (or generate a per-run config_runtime.json) and teach config.py to read:
+
+work dir / input / output paths
+semi CSV name
+plaza name
+return-journey input filename (MP Output.xlsx vs LT_output.xlsx)
+final Excel name
+Then run scripts with cwd = scripts folder and env pointing at that process’s Intermediate_Files/ tree — same pattern as Merge + Normalize.
+
+LT rule (from mp_lt_logic.txt)
+MP + LT present → run Date_validity_check_LT.py; Return Journey reads LT_output.xlsx.
+No LT → skip LT script; Return Journey reads MP Output.xlsx.
+Detection = separator produced a non-empty LT_Pass.xlsx, not a UI checkbox.
+
+
+
+
+Caveats
+Orchestrator always runs LT today — import subprocess.py always includes Date_validity_check_LT.py, and config.py defaults return_journey_input_file = "LT_output.xlsx". Portal must make both conditional; otherwise “no LT” runs break.
+
+MP looks mandatory — Date_validity_check.py always expects MP_Pass.xlsx. If a plaza has only LT (or no MP rows after split), that step fails unless you also make MP optional (not defined yet).
+
+Multi-month passes — separator merges all files; that’s correct. Caveat: overlapping date ranges for the same VRN can make “Valid” if any window matches (current logic). Confirm that’s intended.
+
+Pass header detection — separator needs ≥3 of its HEADER_KEYWORDS and a Pass Type column. Mixed/legacy pass layouts will skip or fail; portal should validate after split (“0 MP rows”, “no Pass Type”) and stop with a clear message.
+
+Other_Pass.xlsx — rows that are neither MP nor LT. Decide: warn only, or block submit if Other is large.
+
+Plaza / codes_dump.json — required for Local/Non-Local. Missing plaza → empty local codes, silent wrong classification. Force plaza selection; optionally allow uploading an updated codes_dump.json later.
+
+Hardcoded / fragile scripts — paths via config, Excel intermediates, some logic quirks (How_to_Run.md notes Cash/Exempt casing, older path docs). Portal integration should copy scripts under Portal/Scripts/..., add env-based config, and fix Return Journey input wiring once—not call Exempt Query/python scripts csv with edited absolute paths.
+
+Runtime / disk — many full Excel intermediates; large months are slow and heavy. Show step progress in Process Management; keep intermediates under Intermediate_Files/ for debugging; optional “keep intermediates” toggle.
+
+Filename import subprocess.py — awkward to run/import; rename orchestrator to something like run_exempt_final.py in the portal copy.
+
+Running config.py / data_processing.py as subprocesses — useless; orchestrator should only run the real steps.
+
+One process at a time — same as other Exempt jobs (single lock + status card).
+
+Semi-final must be the deduped CSV — wrong/old file will still “run” and produce garbage. Prefer import from Merge + Remove Duplicate over free-form upload only.
+
+
+
+
+
+
+Planning to handle caveates:
+
+1 Rename orchestrator	OK. Prefer spelling orchestrator_final.py (you wrote “orchoestrator”).
+2 LT optional; MP always required	OK and clear.
+4 Stop if no Pass Type / no MP rows	OK.
+5 Keep Other_Pass.xlsx for debug only	OK.
+6 Force plaza	OK.
+7 Wire Return Journey to MP vs LT output path	OK.
+8 No step UI; intermediates in Intermediate_Files/	OK.
+10 Don’t run config.py / data_processing.py as steps	OK.
+
+
+
+
+How paths will be passed during execution
+Today scripts resolve paths via config.py:
+
+Semi CSV → input_path(input_file_name) → …/input/daroda_semi_final_output.csv
+Pass files → input_path("MP_Pass.xlsx"), input_path("LT_Pass.xlsx")
+Intermediates / final → output_path("…")
+Return Journey → get_return_journey_input_path() → output/LT_output.xlsx or MP Output.xlsx
+Plaza → plaza_name + codes_dump.json under input
+Portal should not edit those files on disk. Same pattern as Merge + Normalize: set environment variables, then make config.py (in the portal copy) read them.
+
+
+
+Orchestrator flow (path-wise)
+1. Portal creates process folders, copies semi → Intermediate_Files/input/, pass files → Intermediate_Files/pass_raw/
+2. Run Pass_file_seperator with env/args:
+     INPUT  = Intermediate_Files/pass_raw
+     OUTPUT = Intermediate_Files/input   → writes MP_Pass.xlsx, LT_Pass.xlsx [, Other_Pass.xlsx]
+3. If no Pass Type or MP_Pass missing/empty → stop, error to Process Management
+4. has_lt = LT_Pass.xlsx exists and row count > 0
+5. Set env:
+     EXEMPT_FINAL_RETURN_INPUT = "LT_output.xlsx" if has_lt else "MP Output.xlsx"
+6. Subprocess each real script with:
+     cwd = Scripts/…/python_scripts_csv
+     env = os.environ + EXEMPT_FINAL_* 
+7. Order: main → RF3 → combined → Date_validity_check
+         → [Date_validity_check_LT only if has_lt]
+         → Return_Journey_Logic
+8. Copy final Excel from Intermediate_Files/output → process output/
+So paths are not passed as CLI args into every script. The orchestrator sets one shared env, config.py resolves absolute

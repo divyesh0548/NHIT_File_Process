@@ -145,6 +145,31 @@
     </div>
 </article>
 
+<article id="final-exempt-status-card" class="card" style="margin-bottom: 22px;">
+    <div class="section-head">
+        <div>
+            <span class="process-parent-badge exempt-query status-parent-badge">{{ exempt_query_group_label }}</span>
+            <h2>{{ final_exempt_group_label }}</h2>
+            <p id="final-exempt-status-text">
+                {% if final_exempt_state.running %}
+                    Processing is ongoing for "{{ final_exempt_state.process_name }}": {{ final_exempt_state.last_status }}
+                {% elif final_exempt_state.last_status %}
+                    {{ final_exempt_state.last_status }}
+                {% else %}
+                    No {{ final_exempt_group_label }} is running.
+                {% endif %}
+            </p>
+            <p id="final-exempt-status-time" class="muted">
+                {% if final_exempt_state.running and final_exempt_state.started_at %}
+                    Elapsed: calculating...
+                {% else %}
+                    Elapsed: -
+                {% endif %}
+            </p>
+        </div>
+    </div>
+</article>
+
 <article class="list-card">
     <div class="section-head">
         <div>
@@ -181,6 +206,8 @@
     const mergeNormalizeStatusTime = document.getElementById("merge-normalize-status-time");
     const mergeRemoveDupStatusText = document.getElementById("merge-remove-dup-status-text");
     const mergeRemoveDupStatusTime = document.getElementById("merge-remove-dup-status-time");
+    const finalExemptStatusText = document.getElementById("final-exempt-status-text");
+    const finalExemptStatusTime = document.getElementById("final-exempt-status-time");
 
     function formatElapsed(seconds) {
         const hrs = Math.floor(seconds / 3600);
@@ -268,13 +295,36 @@
         }
     }
 
+    async function refreshFinalExemptStatus() {
+        try {
+            const response = await fetch("{{ url_for('final_exempt_status') }}");
+            if (!response.ok) return;
+            const state = await response.json();
+
+            if (state.running) {
+                const step = state.last_status ? ` ${state.last_status}` : "";
+                finalExemptStatusText.textContent =
+                    `Processing is ongoing for "${state.process_name}".${step}`;
+                finalExemptStatusTime.textContent = `Elapsed: ${formatElapsed(state.elapsed_seconds || 0)}`;
+            } else {
+                finalExemptStatusText.textContent =
+                    state.last_status || "No {{ final_exempt_group_label }} is running.";
+                finalExemptStatusTime.textContent = "Elapsed: -";
+            }
+        } catch (err) {
+            // Ignore intermittent polling errors and keep previous status.
+        }
+    }
+
     refreshMergeStatus();
     refreshValidInvalidStatus();
     refreshMergeNormalizeStatus();
     refreshMergeRemoveDupStatus();
+    refreshFinalExemptStatus();
     setInterval(refreshMergeStatus, 3000);
     setInterval(refreshValidInvalidStatus, 3000);
     setInterval(refreshMergeNormalizeStatus, 3000);
     setInterval(refreshMergeRemoveDupStatus, 3000);
+    setInterval(refreshFinalExemptStatus, 3000);
 </script>
 {% endblock %}

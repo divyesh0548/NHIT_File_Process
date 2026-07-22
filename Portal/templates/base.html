@@ -551,7 +551,7 @@
             <nav class="nav">
                 <a class="{{ 'active' if request.endpoint == 'home' else '' }}" href="{{ url_for('home') }}">Home</a>
                 <a class="{{ 'active' if request.endpoint in ('merge_valid_lookup_hub', 'life_cycle_merge', 'valid_invalid_lookup') else '' }}" href="{{ url_for('merge_valid_lookup_hub') }}">{{ merge_valid_lookup_group_label }}</a>
-                <a class="{{ 'active' if request.endpoint in ('exempt_query_hub', 'merge_normalize', 'merge_remove_duplicate') else '' }}" href="{{ url_for('exempt_query_hub') }}">Exempt Query</a>
+                <a class="{{ 'active' if request.endpoint in ('exempt_query_hub', 'merge_normalize', 'merge_remove_duplicate', 'final_exempt_process') else '' }}" href="{{ url_for('exempt_query_hub') }}">Exempt Query</a>
                 <a class="{{ 'active' if request.endpoint == 'file_process_directories' else '' }}" href="{{ url_for('file_process_directories') }}">Directories</a>
                 <a class="{{ 'active' if request.endpoint == 'current_process' else '' }}" href="{{ url_for('current_process') }}">Process Management</a>
             </nav>

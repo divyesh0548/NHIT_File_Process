@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}{{ final_exempt_group_label }}{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <p class="eyebrow">Exempt Query</p>
+        <h1>{{ final_exempt_group_label }}</h1>
+        <p>Process a deduplicated semi-final CSV and mixed pass reports into the final Excel workbook.</p>
+    </div>
+    <div class="actions" style="margin-top: 0;">
+        <a class="btn secondary" href="{{ url_for('exempt_query_hub') }}">Back to Exempt Query</a>
+    </div>
+</section>
+
+{% if messages %}
+    <div class="message-list">
+        {% for message_type, message in messages %}
+            <div class="message {{ 'success' if message_type == 'success' else 'error' }}">
+                {{ message }}
+                {% if message_type == 'success' and 'Process Management' in message %}
+                    <a href="{{ url_for('current_process') }}" style="margin-left: 6px;">Open Process Management</a>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<section class="workflow-layout">
+    <div class="workflow-main">
+        <form id="final-exempt-form" method="post" enctype="multipart/form-data" class="stack">
+            <article class="card">
+                <div class="section-head">
+                    <div>
+                        <h2>Process Inputs</h2>
+                        <p>Pass reports are automatically separated into MP and LT. MP is required; LT runs only when LT rows are found.</p>
+                    </div>
+                </div>
+
+                <div class="stack">
+                    <div class="stack">
+                        <label for="process_name_input" class="muted">Process Name</label>
+                        <input id="process_name_input" class="field" type="text" name="process_name" value="{{ current_process_name }}" placeholder="Enter process name" required>
+                    </div>
+
+                    <div class="form-control-row">
+                        <div class="stack" style="flex: 1 1 280px;">
+                            <label for="plaza_name" class="muted">Plaza</label>
+                            <select id="plaza_name" class="field" name="plaza_name" required>
+                                <option value="">Select plaza</option>
+                                {% for plaza in plazas %}
+                                    <option value="{{ plaza }}" {% if process_config.get('plaza_name') == plaza %}selected{% endif %}>{{ plaza }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="stack" style="flex: 1 1 280px;">
+                            <label for="output_file_name" class="muted">Final output name <span style="font-weight: normal;">(optional)</span></label>
+                            <input id="output_file_name" class="field" type="text" name="output_file_name" value="{{ process_config.get('output_file_name', '') }}" placeholder="{process_name}_final.xlsx">
+                        </div>
+                    </div>
+
+                    <div class="card" style="padding: 16px;">
+                        <h3 style="margin-bottom: 10px;">Semi-final CSV</h3>
+                        <div class="stack" style="gap: 8px; margin-bottom: 12px;">
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="semi_source" value="upload" id="semi_source_upload" checked>
+                                Upload a CSV
+                            </label>
+                            <label class="muted" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="semi_source" value="import" id="semi_source_import">
+                                Import from Merge + Remove Duplicate
+                            </label>
+                        </div>
+                        <div id="semi_upload_wrap" class="stack">
+                            <label for="semi_file" class="muted">Semi-final CSV</label>
+                            <input id="semi_file" class="file-input" type="file" name="semi_file" accept=".csv">
+                        </div>
+                        <div id="semi_import_wrap" class="stack" style="display: none;">
+                            <label for="semi_import" class="muted">Merge + Remove Duplicate output</label>
+                            <select id="semi_import" class="field" name="semi_import">
+                                <option value="">Select semi-final output</option>
+                                {% for item in semi_outputs %}
+                                    <option value="{{ item.relative_path }}">{{ item.label }}</option>
+                                {% endfor %}
+                            </select>
+                            {% if not semi_outputs %}
+                                <p class="muted">No semi-final outputs are available yet. Run Merge + Remove Duplicate first, or upload a CSV.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="card" style="padding: 16px;">
+                        <h3 style="margin-bottom: 10px;">Pass files</h3>
+                        <p class="muted">Upload one or more monthly pass reports in .xls or .xlsx format. They are merged before MP/LT separation.</p>
+                        <label for="pass_files" class="muted">Pass reports</label>
+                        <input id="pass_files" class="file-input" type="file" name="pass_files" accept=".xls,.xlsx" multiple>
+                    </div>
+
+                    <div class="form-control-row">
+                        <button class="btn" type="submit" name="action" value="apply">Apply Inputs</button>
+                    </div>
+                    {% if not submit_ready %}
+                        <p class="muted">Start becomes available after a plaza, one semi-final CSV, and at least one pass file are attached.</p>
+                    {% endif %}
+                    <div class="actions">
+                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Start {{ final_exempt_group_label }}</button>
+                    </div>
+                </div>
+            </article>
+        </form>
+    </div>
+
+    <aside class="workflow-sidebar">
+        <article class="list-card">
+            <div class="section-head">
+                <div>
+                    <h2>Attached Files</h2>
+                    <p>Source inputs remain stored with this process; runtime intermediates are kept in <code>Intermediate_Files/</code>.</p>
+                </div>
+            </div>
+            {% if semi_file or pass_files %}
+                <ul class="data-list">
+                    {% if semi_file %}
+                        <li class="data-row">
+                            <span class="data-name">Semi: {{ semi_file }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="slot" value="semi">
+                                <input type="hidden" name="filename" value="{{ semi_file }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endif %}
+                    {% for filename in pass_files %}
+                        <li class="data-row">
+                            <span class="data-name">Pass: {{ filename }}</span>
+                            <form method="post" style="margin: 0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="process_name" value="{{ current_process_name }}">
+                                <input type="hidden" name="slot" value="pass">
+                                <input type="hidden" name="filename" value="{{ filename }}">
+                                <button class="btn danger" type="submit">Delete</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <div class="empty-state"><p>No files attached yet for this process.</p></div>
+            {% endif %}
+        </article>
+    </aside>
+</section>
+
+<script>
+    (function () {
+        const uploadRadio = document.getElementById("semi_source_upload");
+        const importRadio = document.getElementById("semi_source_import");
+        const uploadWrap = document.getElementById("semi_upload_wrap");
+        const importWrap = document.getElementById("semi_import_wrap");
+        const fileInput = document.getElementById("semi_file");
+        const importSelect = document.getElementById("semi_import");
+
+        function syncSourceUi() {
+            const importing = importRadio && importRadio.checked;
+            if (uploadWrap) uploadWrap.style.display = importing ? "none" : "";
+            if (importWrap) importWrap.style.display = importing ? "" : "none";
+            if (fileInput) {
+                fileInput.disabled = importing;
+                if (importing) fileInput.value = "";
+            }
+            if (importSelect) importSelect.disabled = !importing;
+        }
+
+        if (uploadRadio) uploadRadio.addEventListener("change", syncSourceUi);
+        if (importRadio) importRadio.addEventListener("change", syncSourceUi);
+        syncSourceUi();
+    })();
+</script>
+{% endblock %}
