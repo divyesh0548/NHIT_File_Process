@@ -698,7 +698,7 @@ def get_merge_header_keywords() -> List[str]:
         raise RuntimeError(
             f"Need at least {MIN_MERGE_HEADER_KEYWORDS} LC/ETC/VRN header keywords in "
             f"nhit_file_process; found {len(keywords)}. "
-            "Configure them from Merge + Normalize → Header Keywords."
+            "Configure them from Merge + Normalize -> Header Keywords."
         )
     return keywords
 
@@ -833,7 +833,10 @@ def convert_xlsx_to_csv_with_normalization(
         else MIN_MERGE_HEADER_KEYWORDS
     )
 
+    from csv_converter import WorkbookHeaderNotFoundError
+
     sheet_specs: List[Tuple[int, int, int]] = []
+    skipped_sheets: List[str] = []
     wb1 = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
         for si, ws in enumerate(wb1.worksheets):
@@ -844,11 +847,14 @@ def convert_xlsx_to_csv_with_normalization(
             )
             det = detect_header_row_on_worksheet(ws, keywords, min_matches)
             if det is None:
-                raise RuntimeError(
-                    f"{path.name}: sheet {si} ({sheet_name!r}): no row in 1–"
+                skipped_sheets.append(sheet_name)
+                print(
+                    f"[XLSX][SKIP] sheet {si} ({sheet_name}): no row in 1-"
                     f"{HEADER_SCAN_MAX_ROW} matched at least {min_matches} "
-                    "header keyword(s)."
+                    "header keyword(s); skipping sheet.",
+                    flush=True,
                 )
+                continue
             header_row, header_cols, score = det
             print(
                 f"[XLSX][HEADER] sheet {si} ({sheet_name}): "
@@ -857,6 +863,15 @@ def convert_xlsx_to_csv_with_normalization(
             sheet_specs.append((si, header_row, header_cols))
     finally:
         wb1.close()
+
+    if not sheet_specs:
+        skipped = ", ".join(repr(s) for s in skipped_sheets) or "(none)"
+        raise WorkbookHeaderNotFoundError(
+            f"{path.name}: no sheet matched at least {min_matches} header "
+            f"keyword(s) in rows 1-{HEADER_SCAN_MAX_ROW}. "
+            f"Skipped sheet(s): {skipped}. "
+            "Adjust header keywords or sheet layout."
+        )
 
     out_cols = max(p[2] for p in sheet_specs)
     rows_written = 0
@@ -1009,7 +1024,10 @@ def phase_convert_workbooks_to_csv_and_delete(
     converted_csvs: Set[Path] = set()
 
     try:
-        from csv_converter import HEADER_SCAN_MAX_ROW as _csv_scan_max_row
+        from csv_converter import (
+            HEADER_SCAN_MAX_ROW as _csv_scan_max_row,
+            WorkbookHeaderNotFoundError,
+        )
     except ImportError as exc:
         print(
             f"[WARN] Could not import csv_converter ({exc}); "
@@ -1046,9 +1064,9 @@ def phase_convert_workbooks_to_csv_and_delete(
         return converted_csvs
 
     print(
-        f"\n[PHASE 1] workbook(s) → normalized .csv in one pass "
+        f"\n[PHASE 1] workbook(s) -> normalized .csv in one pass "
         f"(header scan rows 1-{_csv_scan_max_row}, min matches={conv_min_matches}; "
-        f"delete source on success)…",
+        f"delete source on success)...",
         flush=True,
     )
     for path in targets:
@@ -1072,7 +1090,10 @@ def phase_convert_workbooks_to_csv_and_delete(
                 f"({rows_written} row(s), {total_changes} change(s))",
                 flush=True,
             )
-            print(f"[CONVERT+DEL] {path.name} → {out_csv.name}", flush=True)
+            print(f"[CONVERT+DEL] {path.name} -> {out_csv.name}", flush=True)
+        except WorkbookHeaderNotFoundError as exc:
+            print(f"[CONVERT-FAIL] {path.name}: {exc}", flush=True)
+            raise SystemExit(f"Header detection failed for {path.name}: {exc}") from exc
         except Exception as exc:
             print(
                 f"[CONVERT-SKIP] {path.name}: {exc} "

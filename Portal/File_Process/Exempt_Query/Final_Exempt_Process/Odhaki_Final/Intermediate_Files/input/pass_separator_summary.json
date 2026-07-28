@@ -1,0 +1,19 @@
+{
+  "source_file_count": 9,
+  "processed_sheet_count": 9,
+  "pass_type_detected": false,
+  "mp_rows": 0,
+  "lt_rows": 0,
+  "other_rows": 0,
+  "warnings": [
+    "No Pass Type column in Monthly_Pass_Report_Apr-26.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_Dec-25.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_Feb-26.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_Jan-26.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_Jun-26.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_May-26.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_Nov-25.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in Monthly_Pass_Report_Oct-25.xlsx (LocalPassDetailsReport_2); sheet skipped.",
+    "No Pass Type column in odakhi_Monthly_Pass_Report_Mar-26.xlsx (LocalPassDetailsReport_2); sheet skipped."
+  ]
+}

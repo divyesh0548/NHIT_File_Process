@@ -39,6 +39,7 @@ MAX_WORKER_THREADS = 5
 SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 ENABLE_PHASE_2 = True
 SETTLED_VALUE = "SETTLED"
+ACCEPTED_VALUE = "Accepted"
 MIN_MERGE_HEADER_KEYWORDS = 3
 OUTPUT_HEADERS = ("Date & Time", "Veh Reg No.", "MOP", "Lane No")
 MERGE_HEADER_KEYWORDS = list(OUTPUT_HEADERS)
@@ -61,6 +62,12 @@ HEADER_GROUPS = {
         "SettlementType",
         "SETTLEMENT TYPE",
         "Settlement",
+    ],
+    "Transaction Status": [
+        "Transaction Status",
+        "TRANSACTION STATUS",
+        "TransactionStatus",
+        "Txn Status",
     ],
     "Veh Reg No.": [
         "TC_VEH_REG_NO",
@@ -207,9 +214,14 @@ def cell_at(row: List, idx: Optional[int]):
 
 def is_settled_row(row: List, col_map: Dict[int, str]) -> bool:
     st_idx = col_idx(col_map, "Settlement Type")
-    if st_idx is None:
+    if st_idx is not None:
+        return normalize_text(cell_at(row, st_idx)) == normalize_text(SETTLED_VALUE)
+
+    # Fallback: some files don't have "Settlement Type" but provide "Transaction Status".
+    ts_idx = col_idx(col_map, "Transaction Status")
+    if ts_idx is None:
         return False
-    return normalize_text(cell_at(row, st_idx)) == normalize_text(SETTLED_VALUE)
+    return normalize_text(cell_at(row, ts_idx)) == normalize_text(ACCEPTED_VALUE)
 
 
 def lane_as_text(value) -> str:
@@ -279,8 +291,13 @@ def normalize_csv_file(file_path: Path, lookup: Dict[str, str]) -> int:
             return 0
 
         col_map = build_column_map_from_header_row(header_row, lookup)
-        if col_idx(col_map, "Settlement Type") is None:
-            print(f"[WARN] {file_path.name}: no 'Settlement Type' column; output header only.")
+        if (
+            col_idx(col_map, "Settlement Type") is None
+            and col_idx(col_map, "Transaction Status") is None
+        ):
+            print(
+                f"[WARN] {file_path.name}: no 'Settlement Type' or 'Transaction Status' column; output header only."
+            )
 
         writer.writerow(OUTPUT_HEADERS)
 
@@ -323,10 +340,13 @@ def normalize_xlsx_file(file_path: Path, lookup: Dict[str, str]) -> int:
                 if out is not None:
                     data_rows.append(out)
 
-            if col_idx(col_map, "Settlement Type") is None:
+            if (
+                col_idx(col_map, "Settlement Type") is None
+                and col_idx(col_map, "Transaction Status") is None
+            ):
                 print(
                     f"[WARN] {file_path.name} -> {ws.title}: "
-                    "no Settlement Type; output will be header-only."
+                    "no 'Settlement Type' or 'Transaction Status'; output will be header-only."
                 )
 
             if ws.max_row > 1:
@@ -399,10 +419,13 @@ def normalize_xls_file(file_path: Path, lookup: Dict[str, str]) -> int:
                         d_write = parse_datetime_cell(d) if d is not None else d
                     data_rows.append((d_write, v, m, str(lane)))
 
-            if col_idx(col_map, "Settlement Type") is None:
+            if (
+                col_idx(col_map, "Settlement Type") is None
+                and col_idx(col_map, "Transaction Status") is None
+            ):
                 print(
                     f"[WARN] {file_path.name} -> {ws.Name}: "
-                    "no Settlement Type; output will be header-only."
+                    "no 'Settlement Type' or 'Transaction Status'; output will be header-only."
                 )
 
             if last_row > 1:
@@ -587,7 +610,10 @@ def convert_xlsx_to_csv_with_normalization(
         else MIN_MERGE_HEADER_KEYWORDS
     )
 
+    from csv_converter import WorkbookHeaderNotFoundError
+
     sheet_specs: List[Tuple[int, int, int]] = []
+    skipped_sheets: List[str] = []
     wb1 = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
         for si, ws in enumerate(wb1.worksheets):
@@ -598,11 +624,14 @@ def convert_xlsx_to_csv_with_normalization(
             )
             det = detect_header_row_on_worksheet(ws, keywords, min_matches)
             if det is None:
-                raise RuntimeError(
-                    f"{path.name}: sheet {si} ({sheet_name!r}): no row in 1–"
+                skipped_sheets.append(sheet_name)
+                print(
+                    f"[XLSX][SKIP] sheet {si} ({sheet_name}): no row in 1-"
                     f"{HEADER_SCAN_MAX_ROW} matched at least {min_matches} "
-                    "header keyword(s)."
+                    "header keyword(s); skipping sheet.",
+                    flush=True,
                 )
+                continue
             header_row, header_cols, score = det
             print(
                 f"[XLSX][HEADER] sheet {si} ({sheet_name}): "
@@ -611,6 +640,15 @@ def convert_xlsx_to_csv_with_normalization(
             sheet_specs.append((si, header_row, header_cols))
     finally:
         wb1.close()
+
+    if not sheet_specs:
+        skipped = ", ".join(repr(s) for s in skipped_sheets) or "(none)"
+        raise WorkbookHeaderNotFoundError(
+            f"{path.name}: no sheet matched at least {min_matches} header "
+            f"keyword(s) in rows 1-{HEADER_SCAN_MAX_ROW}. "
+            f"Skipped sheet(s): {skipped}. "
+            "Adjust header keywords or sheet layout."
+        )
 
     out_cols = max(p[2] for p in sheet_specs)
     rows_written = 0
@@ -785,7 +823,7 @@ def phase_convert_workbooks_to_csv_and_delete(
     converted_csvs: Set[Path] = set()
 
     try:
-        from csv_converter import HEADER_SCAN_MAX_ROW
+        from csv_converter import HEADER_SCAN_MAX_ROW, WorkbookHeaderNotFoundError
     except ImportError as exc:
         print(
             f"[WARN] Could not import csv_converter ({exc}); "
@@ -819,9 +857,9 @@ def phase_convert_workbooks_to_csv_and_delete(
         return converted_csvs
 
     print(
-        f"\n[PHASE 1] Workbook(s) → normalized .csv "
-        f"(≥{min_matches} keyword hits in rows 1–{HEADER_SCAN_MAX_ROW} per sheet), "
-        f"{len(targets)} workbook(s)…",
+        f"\n[PHASE 1] Workbook(s) -> normalized .csv "
+        f"(>={min_matches} keyword hits in rows 1-{HEADER_SCAN_MAX_ROW} per sheet), "
+        f"{len(targets)} workbook(s)...",
         flush=True,
     )
     for path in targets:
@@ -837,10 +875,13 @@ def phase_convert_workbooks_to_csv_and_delete(
             _delete_with_retries(path)
             converted_csvs.add(out_csv.resolve())
             print(
-                f"[CONVERT+DEL] {path.name} → {out_csv.name} "
+                f"[CONVERT+DEL] {path.name} -> {out_csv.name} "
                 f"(normalized data rows written: {n_rows})",
                 flush=True,
             )
+        except WorkbookHeaderNotFoundError as exc:
+            print(f"[CONVERT-FAIL] {path.name}: {exc}", flush=True)
+            raise SystemExit(f"Header detection failed for {path.name}: {exc}") from exc
         except Exception as exc:
             print(
                 f"[CONVERT-SKIP] {path.name}: {exc} "

@@ -316,6 +316,43 @@ def merge_normalize_file_kind_label(file_kind):
     return MERGE_NORMALIZE_FILE_KIND_LABELS.get(kind, kind or "")
 
 
+def run_subprocess_streaming(command, cwd=None, env=None):
+    """
+    Run a subprocess, print stdout/stderr to the portal terminal as they arrive,
+    and return (returncode, combined_output_text).
+    """
+    run_env = os.environ.copy()
+    if env:
+        run_env.update(env)
+    # Force unbuffered child output so logs appear while the job is running.
+    run_env["PYTHONUNBUFFERED"] = "1"
+    run_env.setdefault("PYTHONIOENCODING", "utf-8")
+
+    collected = []
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=run_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+    except Exception:
+        raise
+
+    assert process.stdout is not None
+    for line in process.stdout:
+        collected.append(line)
+        print(line, end="", flush=True)
+
+    returncode = process.wait()
+    return returncode, "".join(collected)
+
+
 def process_started_success_message(title, process_name, detail=""):
     label = f"{title} ({detail})" if detail else title
     return (
@@ -1483,19 +1520,24 @@ def process_merge_normalize_files(file_kind, process_name):
     env["MERGE_NORMALIZE_HEADER_KEYWORDS"] = json.dumps(header_keywords)
 
     try:
-        result = subprocess.run(
-            ["python", str(script_path)],
+        returncode, combined = run_subprocess_streaming(
+            ["python", "-u", str(script_path)],
             cwd=str(script_dir),
             env=env,
-            check=False,
         )
     except Exception as exc:
         return False, f"{MERGE_NORMALIZE_GROUP_LABEL} failed to start: {exc}"
 
-    if result.returncode != 0:
+    if returncode != 0:
+        fail_line = ""
+        for line in reversed(combined.splitlines()):
+            if "[CONVERT-FAIL]" in line or "Header detection failed" in line:
+                fail_line = line.strip()
+                break
+        detail = fail_line or combined.strip()[-800:] or f"exit code {returncode}"
         return (
             False,
-            f"{MERGE_NORMALIZE_GROUP_LABEL} ({kind}) failed with exit code {result.returncode}",
+            f"{MERGE_NORMALIZE_GROUP_LABEL} ({kind}) failed: {detail}",
         )
 
     if not output_file.exists():
@@ -1606,12 +1648,12 @@ def _set_final_exempt_progress(message):
             final_exempt_state["last_status"] = message
 
 
-def _format_final_exempt_subprocess_error(stage_name, result):
-    detail = (result.stderr or result.stdout or "").strip()
+def _format_final_exempt_subprocess_error(stage_name, returncode, combined_output=""):
+    detail = (combined_output or "").strip()
     if detail:
         detail = detail[-2000:]
-        return f"{stage_name} failed with exit code {result.returncode}. Details: {detail}"
-    return f"{stage_name} failed with exit code {result.returncode}."
+        return f"{stage_name} failed with exit code {returncode}. Details: {detail}"
+    return f"{stage_name} failed with exit code {returncode}."
 
 
 def _validate_final_exempt_semi_file(semi_file):
@@ -1635,17 +1677,15 @@ def _validate_final_exempt_semi_file(semi_file):
 def _run_final_exempt_script(script_dir, script_name, stage_name, env, expected_files=()):
     _set_final_exempt_progress(stage_name)
     try:
-        result = subprocess.run(
-            [sys.executable, script_name],
+        returncode, combined = run_subprocess_streaming(
+            [sys.executable, "-u", script_name],
             cwd=str(script_dir),
             env=env,
-            capture_output=True,
-            text=True,
         )
     except Exception as exc:
         return False, f"{stage_name} could not start: {exc}"
-    if result.returncode != 0:
-        return False, _format_final_exempt_subprocess_error(stage_name, result)
+    if returncode != 0:
+        return False, _format_final_exempt_subprocess_error(stage_name, returncode, combined)
     missing = [Path(path).name for path in expected_files if not Path(path).is_file()]
     if missing:
         return False, f"{stage_name} completed but did not create: {', '.join(missing)}."
@@ -3578,4 +3618,7 @@ def valid_invalid_lookup():
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # use_reloader=False: the debug reloader (watchdog) was restarting mid-job when
+    # unrelated packages under site-packages changed, killing background Process runs.
+    # Restart the portal manually after editing code.
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)

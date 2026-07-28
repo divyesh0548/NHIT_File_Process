@@ -220,7 +220,7 @@ def detect_header_xlsx(
 
         if best_row is None or best_sheet is None:
             raise RuntimeError(
-                f"{path.name}: no row in 1–{HEADER_SCAN_MAX_ROW} on any sheet matched "
+                f"{path.name}: no row in 1-{HEADER_SCAN_MAX_ROW} on any sheet matched "
                 f"at least {min_matches} header keyword(s). "
                 "Adjust HEADER_KEYWORDS or INPUT_FILE."
             )
@@ -279,6 +279,10 @@ def _append_xlsx_worksheet_rows(
     return rows_written
 
 
+class WorkbookHeaderNotFoundError(RuntimeError):
+    """Raised when no worksheet in a workbook matches the header keywords."""
+
+
 def stream_xlsx_all_sheets_to_csv(
     path: Path,
     out_path: Path,
@@ -287,10 +291,11 @@ def stream_xlsx_all_sheets_to_csv(
 ) -> int:
     """
     One CSV from all worksheets: detect header on each sheet (rows 1–50), write
-    header line once, then all data rows from every sheet in order.
+    header line once, then data rows from every sheet that has a qualifying header.
 
-    Every sheet must have at least one qualifying header row. Output width is the
-    maximum header width found across sheets.
+    Sheets without a matching header are skipped. If no sheet matches, raises
+    WorkbookHeaderNotFoundError. Output width is the maximum header width among
+    matched sheets.
 
     Returns total CSV rows written (including the single header row).
     """
@@ -301,6 +306,7 @@ def stream_xlsx_all_sheets_to_csv(
     # read_only: iterating for header detection advances each sheet's stream; open
     # again before streaming so every sheet is read from row 1 once.
     sheet_specs: List[Tuple[int, int, int]] = []
+    skipped_sheets: List[str] = []
     wb1 = load_workbook(path, read_only=True, data_only=True, keep_links=False)
     try:
         for si, ws in enumerate(wb1.worksheets):
@@ -311,12 +317,14 @@ def stream_xlsx_all_sheets_to_csv(
             )
             det = detect_header_row_on_worksheet(ws, keywords, min_matches)
             if det is None:
-                raise RuntimeError(
-                    f"{path.name}: sheet {si} ({getattr(ws, 'title', '?')!r}): "
-                    f"no row in 1–{HEADER_SCAN_MAX_ROW} matched at least "
-                    f"{min_matches} header keyword(s). "
-                    "Adjust HEADER_KEYWORDS or sheet layout."
+                skipped_sheets.append(sheet_name)
+                print(
+                    f"[XLSX][SKIP] sheet {si} ({sheet_name}): no row in 1-"
+                    f"{HEADER_SCAN_MAX_ROW} matched at least {min_matches} "
+                    "header keyword(s); skipping sheet.",
+                    flush=True,
                 )
+                continue
             header_row, header_cols, score = det
             print(
                 f"[XLSX][HEADER] sheet {si} ({sheet_name}): "
@@ -325,6 +333,15 @@ def stream_xlsx_all_sheets_to_csv(
             sheet_specs.append((si, header_row, header_cols))
     finally:
         wb1.close()
+
+    if not sheet_specs:
+        skipped = ", ".join(repr(s) for s in skipped_sheets) or "(none)"
+        raise WorkbookHeaderNotFoundError(
+            f"{path.name}: no sheet matched at least {min_matches} header "
+            f"keyword(s) in rows 1-{HEADER_SCAN_MAX_ROW}. "
+            f"Skipped sheet(s): {skipped}. "
+            "Adjust header keywords or sheet layout."
+        )
 
     out_cols = max(p[2] for p in sheet_specs)
     print(
@@ -449,10 +466,10 @@ def detect_header_xls(
                 best_width = width
 
         if best_row is None:
-            raise RuntimeError(
-                f"{path.name}: no row in 1–{scan_last} matched at least "
-                f"{min_matches} header keyword(s). "
-                "Adjust HEADER_KEYWORDS or INPUT_FILE."
+            raise WorkbookHeaderNotFoundError(
+                f"{path.name}: no sheet matched at least {min_matches} header "
+                f"keyword(s) in rows 1-{scan_last} (first sheet). "
+                "Adjust header keywords or sheet layout."
             )
 
         return best_row, best_width
@@ -548,12 +565,12 @@ def convert_workbook(
 
     if suffix == ".xlsx":
         print(
-            f"[OK] {path.name} → {out_path.name}  "
-            f"(all sheets → one CSV, {n} row(s))"
+            f"[OK] {path.name} -> {out_path.name}  "
+            f"(all sheets -> one CSV, {n} row(s))"
         )
     else:
         print(
-            f"[OK] {path.name} → {out_path.name}  (header row {header_row}, "
+            f"[OK] {path.name} -> {out_path.name}  (header row {header_row}, "
             f"{header_cols} cols, {n} CSV row(s))"
         )
     return out_path
