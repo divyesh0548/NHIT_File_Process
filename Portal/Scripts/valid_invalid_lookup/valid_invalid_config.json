@@ -1,0 +1,173 @@
+{
+  "JOURNEY_TYPES_TO_DROP": [
+    "ANNUALPASS",
+    "ANNUALPASS:LocalSingleC",
+    "ANNUALPASS:RETURN",
+    "ANNUALPASS:SINGLE",
+    "GlobalExempt",
+    "ANNUALPASS_RETURN",
+    "ANNUALPASS_FULL",
+    "Annual Pass Single",
+    "GlobalExemption",
+    "Global Exemption",
+    "Annual Pass Trip",
+    "0",
+    "0.0000",
+    "Rejected Trip",
+    "Rejected Trip Commercial",
+    "Annual Pass Trip Personal",
+    "Rejected Trip Personal",
+    "EXEMPTED"
+  ],
+  "STATUS_COLUMN_CANDIDATES": [
+    "Settlement Type",
+    "Txn Status",
+    "Status",
+    "Transaction Status",
+    "transaction status"
+  ],
+  "ACCEPTED_STATUS_VALUES": [
+    "ACCEPTED",
+    "Accepted",
+    "SETTLED"
+  ],
+  "LOCAL_CONTI_SINGLE_JOURNEY_TYPES": [
+    "Local Cont.",
+    "Local Single",
+    "Local Vehicle(Commercial)",
+    "LocalSingleC",
+    "Local Single Journey Commercial",
+    "Local Vehicle Commercial"
+  ],
+  "CONT_JOURNEY_TYPES": [
+    "Return Journey",
+    "RETURN",
+    "RETURN PASS",
+    "Return",
+    "Cont. Journey",
+    "Return Journey Personal"
+  ],
+  "RATE_SHEET_JOURNEY_COLUMN_RENAMES": {
+    "Local Conti/Local Single": "Local Conti/Single",
+    "Return Journey": "Cont. Journey"
+  },
+  "LIFECYCLE_EXCLUDED_VEHICLE_CLASSES": [
+    "BUS",
+    "BUS",
+    "CAMPER VAN / TRAILER",
+    "CASH VAN",
+    "Error",
+    "MAXI CAB",
+    "MOTOR CAB",
+    "OMNI BUS",
+    "OMNIBUS",
+    "Invalid"
+  ],
+  "BUS_VEHICLE_CLASSES": [
+    "BUS",
+    "BUS",
+    "OMNI BUS",
+    "OMNIBUS"
+  ],
+  "HEAVY_SPECIAL_VEHICLE_CLASSES": [
+    "CONSTRUCTION EQUIPMENT VEHICLE",
+    "EARTH MOVING EQUIPMENT",
+    "VEHICLE FITTED WITH AIR GENERATOR",
+    "VEHICLE FITTED WITH COMPRESSOR",
+    "VEHICLE FITTED WITH RIG",
+    "EXCAVATOR",
+    "TREE TRIMMING VEHICLE",
+    "TOWER WAGONS"
+  ],
+  "CRANE_MOUNTED_VEHICLE_CLASS": "CRANE MOUNTED VEHICLE",
+  "NPCI_TO_TC_CLASS": {
+    "Car": [
+      "Car / Jeep / Van",
+      "Car/Jeep/Van",
+      "VC4 - Car / Jeep / Van",
+      "VC4",
+      "Tata Ace and Similar mini Light Commercial Vehicle",
+      "Tata Ace or Similar Mini LCV",
+      "VC20",
+      "VC20 - Tata Ace or similar mini LCV"
+    ],
+    "LCV": [
+      "Mini-Bus",
+      "LCV",
+      "Light Commercial vehicle 2-axle",
+      "VC5",
+      "VC9"
+    ],
+    "Trk 2 Axle": [
+      "Truck 2 - axle",
+      "Bus 2-axle",
+      "VC10",
+      "VC7",
+      "VC10 - Truck 2 Axle",
+      "VC7 - Bus 2 Axle"
+    ],
+    "Truck 3 axle": [
+      "Truck 3 - axle",
+      "Truck 3-Axle",
+      "VC8",
+      "VC11",
+      "Bus 3-axle",
+      "VC11 - Truck 3 Axle",
+      "VC8 - Bus 3 Axle"
+    ],
+    "MAV": [
+      "Truck 4 - axle",
+      "Truck 4-Axle",
+      "Truck 5 - axle",
+      "Truck 6 - axle",
+      "VC12",
+      "VC13",
+      "VC14"
+    ]
+  },
+  "ZERO_SETTLEMENT_REMOVE_JOURNEY_TYPES": [
+    "Cont. Journey",
+    "Single Journey",
+    "Local Conti/Single",
+    "Local Cont.",
+    "Local Single",
+    "Return Journey",
+    "SINGLE",
+    "RETURN",
+    "LocalSingleC",
+    "FULL",
+    "LOCAL TRIP",
+    "SINGLE JOURNEY",
+    "RETURN PASS",
+    "Return",
+    "Single",
+    "LocalSingleC",
+    "Local Vehicle(Commercial)",
+    "Local Vehicle Commercial"
+  ],
+  "DISCOUNT_PASS_JOURNEY_TYPES": [
+    "DISCOUNTED",
+    "DISCOUNTMP",
+    "Monthly Pass-50 trips",
+    "Monthly Pass Comm",
+    "Monthly Pass Non Comm",
+    "Local Non Commercial",
+    "Local20KM",
+    "MonthlyExempted",
+    "Discount Pass",
+    "Monthly Pass",
+    "Local Vehicle(Commercial)",
+    "Local Pass Non Comm",
+    "NON_FIN",
+    "Monthly Pass 20 Km"
+  ],
+  "INVALID_EXCLUDED_VEHICLE_CLASSES": [
+    "BUS",
+    "CONSTRUCTION EQUIPMENT VEHICLE",
+    "OMNI BUS",
+    "TOWER WAGONS",
+    "VEHICLE FITTED WITH AIR GENERATOR",
+    "VEHICLE FITTED WITH COMPRESSOR",
+    "VEHICLE FITTED WITH RIG"
+  ]
+}

@@ -9,6 +9,16 @@
         <h1>Valid/Invalid Lookup</h1>
         <p>Upload source files and submit this process.</p>
     </div>
+    <div class="actions" style="margin-top: 0;">
+        <button
+            type="button"
+            class="btn secondary"
+            data-bs-toggle="modal"
+            data-bs-target="#validInvalidConfigModal"
+        >
+            Process Config
+        </button>
+    </div>
 </section>
 
 {% if messages %}
@@ -162,7 +172,7 @@
                         <p class="muted">Supported file types: {{ allowed_extensions | join(', ') }}</p>
                     </div>
                     <div class="form-control-row">
-                        <button class="btn" type="submit" name="action" value="upload">Upload</button>
+                        <button class="btn secondary" type="submit" name="action" value="upload">Upload</button>
                     </div>
                     {% if not submit_ready %}
                         <p class="muted">
@@ -171,7 +181,7 @@
                         </p>
                     {% endif %}
                     <div class="actions">
-                        <button class="btn secondary" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Submit</button>
+                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Submit</button>
                     </div>
                 </div>
             </article>
@@ -270,4 +280,6 @@
         </article>
     </aside>
 </section>
+
+{% include "partials/valid_invalid_config_modal.html" %}
 {% endblock %}

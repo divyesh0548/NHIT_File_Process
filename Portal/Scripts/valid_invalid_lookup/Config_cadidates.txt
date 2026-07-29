@@ -1,7 +1,8 @@
 # Config lists for Valid/Invalid Lookup live in:
-#   valid_invalid_config.py  (edit that file to update lists/mappings)
+#   valid_invalid_config.py   (defaults + schema + helpers)
+#   valid_invalid_config.json (portal-editable values; overlays defaults)
 #
-# Mapping to Code candidates (moved into valid_invalid_config.py):
+# Mapping to Code candidates:
 # 1. Journey types to drop ................. JOURNEY_TYPES_TO_DROP
 # 2. Status column candidates .............. STATUS_COLUMN_CANDIDATES
 # 3. Accepted status values ................ ACCEPTED_STATUS_VALUES

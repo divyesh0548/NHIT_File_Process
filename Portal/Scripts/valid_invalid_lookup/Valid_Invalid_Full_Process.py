@@ -38,6 +38,34 @@ from valid_invalid_config import (
 )
 
 
+def normalize_vehicle_class(value) -> str:
+    """Strip + casefold so ' BUS' / 'BUS' / 'bus' compare equal."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().casefold()
+
+
+def normalized_vehicle_class_set(values) -> set:
+    return {normalize_vehicle_class(v) for v in values if normalize_vehicle_class(v)}
+
+
+def vehicle_class_isin(series: pd.Series, values) -> pd.Series:
+    targets = normalized_vehicle_class_set(values)
+    return series.map(normalize_vehicle_class).isin(targets)
+
+
+def vehicle_class_eq(series: pd.Series, value) -> pd.Series:
+    target = normalize_vehicle_class(value)
+    if not target:
+        return pd.Series(False, index=series.index)
+    return series.map(normalize_vehicle_class) == target
+
+
 # -----------------------------
 # Input/Output Paths
 # -----------------------------
@@ -230,22 +258,20 @@ def get_rate_from_rates(tc_class, journey_type, rates_df):
 
 
 def vehicle_lifecycle(df_result, rates_df):
-    df_result = df_result[~df_result["vehicle class"].isin(LIFECYCLE_EXCLUDED_VEHICLE_CLASSES)]
-
-    vehicle_classes = set(HEAVY_SPECIAL_VEHICLE_CLASSES)
+    df_result = df_result[~vehicle_class_isin(df_result["vehicle class"], LIFECYCLE_EXCLUDED_VEHICLE_CLASSES)]
 
     conditions = [
-        df_result["vehicle class"].isin(vehicle_classes)
+        vehicle_class_isin(df_result["vehicle class"], HEAVY_SPECIAL_VEHICLE_CLASSES)
         & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_SINGLE),
-        df_result["vehicle class"].isin(vehicle_classes)
+        vehicle_class_isin(df_result["vehicle class"], HEAVY_SPECIAL_VEHICLE_CLASSES)
         & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_CONT),
-        df_result["vehicle class"].isin(vehicle_classes)
+        vehicle_class_isin(df_result["vehicle class"], HEAVY_SPECIAL_VEHICLE_CLASSES)
         & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_LOCAL),
-        (df_result["vehicle class"] == CRANE_MOUNTED_VEHICLE_CLASS)
+        vehicle_class_eq(df_result["vehicle class"], CRANE_MOUNTED_VEHICLE_CLASS)
         & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_SINGLE),
-        (df_result["vehicle class"] == CRANE_MOUNTED_VEHICLE_CLASS)
+        vehicle_class_eq(df_result["vehicle class"], CRANE_MOUNTED_VEHICLE_CLASS)
         & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_CONT),
-        (df_result["vehicle class"] == CRANE_MOUNTED_VEHICLE_CLASS)
+        vehicle_class_eq(df_result["vehicle class"], CRANE_MOUNTED_VEHICLE_CLASS)
         & (df_result["updated journey type"] == UPDATED_JOURNEY_TYPE_LOCAL),
     ]
 
@@ -280,7 +306,7 @@ def vehicle_lifecycle(df_result, rates_df):
 
 
 def vehicle_bus(df_result):
-    df_result = df_result[df_result["vehicle class"].isin(BUS_VEHICLE_CLASSES)]
+    df_result = df_result[vehicle_class_isin(df_result["vehicle class"], BUS_VEHICLE_CLASSES)]
     df_result = df_result.dropna(subset=["weight"])
 
     def classify_weight(row):
@@ -424,7 +450,7 @@ def main():
     df_invalid = df_invalid[(df_invalid["Impact"] != 0) & (df_invalid["Impact"] > 0)]
 
     df_invalid = df_invalid[
-        ~df_invalid["vehicle class"].fillna("").str.strip().str.upper().isin(INVALID_EXCLUDED_VEHICLE_CLASSES)
+        ~vehicle_class_isin(df_invalid["vehicle class"], INVALID_EXCLUDED_VEHICLE_CLASSES)
     ]
 
     df_valid = df_valid[df_valid["Rate"] != 0]

@@ -21,6 +21,7 @@ from openpyxl import load_workbook
 from win32com.client import DispatchEx
 
 from merge_files import merge_files_in_folder
+from vrn_normalization_config import get_normalization_groups
 
 BASE_DIR = Path(__file__).resolve().parent
 PORTAL_ROOT = BASE_DIR.parents[1]
@@ -52,121 +53,8 @@ TRACKED_HEADER_COLUMNS = {
     "Date & Time",
 }
 
-NORMALIZATION_GROUPS = {
-    "TC Class": [
-        "MVC_TLC_CLASS",
-        "MVC",
-        "MVC (TLC CLASS)",
-        "VEH CLASS",
-        "TC CLASS",
-        "Veh Class",
-        "Operator_Class",
-        "OperatorClass",
-        "TcClass",
-        "Operator Class",
-        "MVC TLC CLASS",
-    ],
-    "Veh Reg No.": [
-        "TC_VEH_REG_NO",
-        "Vehicle Reg. No.",
-        "Vehicle Reg. No",
-        "VEHICLE_REG_NO",
-        "veh_reg_no_",
-        "Veh Reg No.",
-        "VEH REG NO",
-        "TC VEH REG NO",
-        "VEH. REG. NO.",
-        "Licence Plate No",
-        "VRN",
-        "Licence Plate No.",
-        "Plate No",
-        "NPCI VRN",
-        "Veh Reg Num",
-        "VehicleNumber",
-        "VEH_REG_NO",
-        "Platenumber",
-        "Vehicle Registration Number",
-        "vehicle_reg_no",
-        "Vehicle No",
-    ],
-    "MOP": [
-        "PAYMENT_TYPE",
-        "Payment Method",
-        "MVC MOP",
-        "PAYMENT TYPE",
-        "Payment",
-        "Mode",
-        "Ticket_Type",
-        "MVC_TLC_MOP",
-        "TransactionTypeTC",
-        "PaymentMeans",
-        "PAYMENT METHOD",
-        "MVC (TLC MOP)",
-        "MVC TLC MOP",
-    ],
-    "Lane No": [
-        "LANE NO",
-        "LaneNo",
-        "Lane ID",
-        "Lane Number",
-        "LANE_NUMBER",
-        "Lane",
-    ],
-    "Description": [
-        "DESC",
-        "DESCRIPTION",
-        "Remarks",
-        "Remark"
-    ],
-    "File Name": [
-        "FILENAME",
-        "FileName",
-        "SOURCE FILE",
-    ],
-    "Date & Time": [
-        "DATE",
-        "Date Time",
-        "Reader Read Time",
-        "DATETIME",
-        "DATE TIME",
-        "Date/Time",
-        "Transaction Date",
-        "Txn Date",
-        "TXN DATE",
-    ],
-    "Car": ["CarJeep", "CAR/JEEP/VAN", r"CAR\JEEP"],
-    "LCV": ["MiniBus", "LCV/MINI BUS"],
-    "MAV": [
-        "MAV_4",
-        "TRUCK 4-6 AXLE",
-    ],
-    "TRUCK 3 AXLE": [
-        "TRUCK 3 AXLE-2T",
-        "Truck3X",
-        "TRUCK-3 AXLE",
-    ],
-    "TRK 2 AXLE": [
-        "TRUCK-2 AXLE",
-        "BUS-2 AXLE",
-        "TRUCK 2 AXLE",
-    ],
-    "TAG": [
-        "TAG-",
-        "TAG-NA",
-        "TAGNA",
-    ],
-    "CASH": [
-        "CASH-UPI",
-        "CASHS",
-    ],
-    "ETC": [
-        "ETC_PENALTY_CASH",
-        "ETC_PENALTY_CD",
-    ],
-    "EXEMPT": [
-        "EXEMPTED",
-    ],
-}
+# Resolved from Normalization_JSON_Data.json with Python defaults as fallback.
+NORMALIZATION_GROUPS = get_normalization_groups()
 
 
 def normalize_text(value):
@@ -715,7 +603,7 @@ def _normalize_and_filter_row_for_csv(
     row_values,
     normalization_lookup,
     header_columns: Dict[int, str],
-):
+     ):
     updates, drop_row = process_row_values(
         row_values,
         normalization_lookup,
@@ -752,7 +640,7 @@ def _append_normalized_xlsx_rows(
     normalization_lookup,
     header_columns: Dict[int, str],
     sheet_label: str = "",
-) -> Tuple[int, int]:
+    ) -> Tuple[int, int]:
     rows_written = 0
     total_changes = 0
     tail_empty = 0
@@ -920,7 +808,7 @@ def convert_xls_to_csv_with_normalization(
     keywords: Sequence[str],
     normalization_lookup,
     min_keyword_matches: Optional[int] = None,
-) -> Tuple[int, int]:
+    ) -> Tuple[int, int]:
     header_row, header_cols = _detect_xls_header(path, keywords, min_keyword_matches)
 
     pythoncom.CoInitialize()
@@ -983,7 +871,7 @@ def convert_workbook_to_normalized_csv(
     normalization_lookup,
     out_path: Optional[Path] = None,
     min_keyword_matches: Optional[int] = None,
-) -> Tuple[Path, int, int]:
+    ) -> Tuple[Path, int, int]:
     path = path.resolve()
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -1020,7 +908,7 @@ def convert_workbook_to_normalized_csv(
 def phase_convert_workbooks_to_csv_and_delete(
     folder_path: Path,
     normalization_lookup,
-) -> Set[Path]:
+     ) -> Set[Path]:
     converted_csvs: Set[Path] = set()
 
     try:
@@ -1136,7 +1024,8 @@ def process_file(file_path: Path, normalization_lookup):
 
 def main():
     start_time = time.perf_counter()
-    normalization_lookup = build_lookup(NORMALIZATION_GROUPS)
+    # Reload JSON each run so portal edits apply without restarting the process script.
+    normalization_lookup = build_lookup(get_normalization_groups())
 
     INPUT_FOLDER.mkdir(parents=True, exist_ok=True)
     MERGE_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)

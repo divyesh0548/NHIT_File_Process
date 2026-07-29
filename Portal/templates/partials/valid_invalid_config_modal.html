@@ -1,0 +1,382 @@
+<div class="modal fade" id="validInvalidConfigModal" tabindex="-1" aria-labelledby="validInvalidConfigModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content header-keywords-modal">
+            <div class="modal-header">
+                <h5 class="modal-title" id="validInvalidConfigModalLabel">Valid/Invalid Process Config</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="muted">
+                    Edit keyword lists and mappings used by Valid/Invalid Lookup.
+                    Section names cannot be removed; you can add or delete keywords inside each section.
+                </p>
+                <div id="vil-config-error" class="message error" style="display: none; margin-bottom: 14px;"></div>
+                <div id="vil-config-success" class="message success" style="display: none; margin-bottom: 14px;"></div>
+                <div id="vil-config-loading" class="keywords-loading" aria-live="polite">
+                    <div class="keywords-loading-spinner" role="status" aria-label="Loading config"></div>
+                    <p class="muted">Loading process config…</p>
+                </div>
+                <div id="vil-config-editor" class="vil-config-editor" style="display: none;"></div>
+            </div>
+            <div class="modal-footer" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn secondary" id="vil-config-reset-btn">Reset to defaults</button>
+                <div style="flex: 1;"></div>
+                <button type="button" class="btn secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn" id="vil-config-save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const apiBase = "{{ url_for('api_get_valid_invalid_config') }}";
+        const resetUrl = "{{ url_for('api_reset_valid_invalid_config') }}";
+        const modalEl = document.getElementById("validInvalidConfigModal");
+        const editorEl = document.getElementById("vil-config-editor");
+        const loadingEl = document.getElementById("vil-config-loading");
+        const errorEl = document.getElementById("vil-config-error");
+        const successEl = document.getElementById("vil-config-success");
+        const saveBtn = document.getElementById("vil-config-save-btn");
+        const resetBtn = document.getElementById("vil-config-reset-btn");
+
+        let schema = [];
+        let values = {};
+
+        function showError(message) {
+            if (!errorEl) return;
+            if (!message) {
+                errorEl.style.display = "none";
+                errorEl.textContent = "";
+                return;
+            }
+            errorEl.textContent = message;
+            errorEl.style.display = "block";
+        }
+
+        function showSuccess(message) {
+            if (!successEl) return;
+            if (!message) {
+                successEl.style.display = "none";
+                successEl.textContent = "";
+                return;
+            }
+            successEl.textContent = message;
+            successEl.style.display = "block";
+        }
+
+        function setLoading(loading) {
+            if (loadingEl) loadingEl.style.display = loading ? "flex" : "none";
+            if (editorEl) editorEl.style.display = loading ? "none" : "";
+            if (saveBtn) saveBtn.disabled = loading;
+            if (resetBtn) resetBtn.disabled = loading;
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        function collectValuesFromDom() {
+            const next = {};
+            schema.forEach((section) => {
+                const key = section.key;
+                if (section.type === "string") {
+                    const input = editorEl.querySelector(`[data-string-key="${CSS.escape(key)}"]`);
+                    next[key] = input ? input.value : "";
+                    return;
+                }
+                if (section.type === "list") {
+                    const items = [];
+                    editorEl.querySelectorAll(`[data-list-key="${CSS.escape(key)}"] .vil-chip-text`).forEach((el) => {
+                        const text = (el.textContent || "").trim();
+                        if (text) items.push(text);
+                    });
+                    next[key] = items;
+                    return;
+                }
+                if (section.type === "dict") {
+                    const obj = {};
+                    editorEl.querySelectorAll(`[data-dict-key="${CSS.escape(key)}"] .vil-dict-row`).forEach((row) => {
+                        const k = (row.querySelector(".vil-dict-k")?.value || "").trim();
+                        const v = (row.querySelector(".vil-dict-v")?.value || "").trim();
+                        if (k && v) obj[k] = v;
+                    });
+                    next[key] = obj;
+                    return;
+                }
+                if (section.type === "dict_of_lists") {
+                    const obj = {};
+                    editorEl.querySelectorAll(`[data-dol-key="${CSS.escape(key)}"] .vil-dol-group`).forEach((group) => {
+                        const groupKey = group.dataset.groupKey;
+                        const items = [];
+                        group.querySelectorAll(".vil-chip-text").forEach((el) => {
+                            const text = (el.textContent || "").trim();
+                            if (text) items.push(text);
+                        });
+                        obj[groupKey] = items;
+                    });
+                    next[key] = obj;
+                }
+            });
+            return next;
+        }
+
+        function bindChipDeletes(root) {
+            root.querySelectorAll(".js-vil-chip-delete").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const chip = btn.closest(".vil-chip");
+                    if (chip) chip.remove();
+                });
+            });
+        }
+
+        function makeChip(text) {
+            const chip = document.createElement("span");
+            chip.className = "vil-chip";
+            chip.innerHTML =
+                `<span class="vil-chip-text">${escapeHtml(text)}</span>` +
+                `<button type="button" class="btn danger js-vil-chip-delete" aria-label="Remove">×</button>`;
+            return chip;
+        }
+
+        function renderListSection(section, listValues) {
+            const wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.innerHTML =
+                `<div class="vil-section-head">` +
+                `<h3>${escapeHtml(section.label)}</h3>` +
+                (section.description ? `<p class="muted">${escapeHtml(section.description)}</p>` : "") +
+                `</div>` +
+                `<div class="vil-chip-list" data-list-key="${escapeHtml(section.key)}"></div>` +
+                `<div class="form-control-row vil-add-row">` +
+                `<input class="field vil-add-input" type="text" placeholder="Add keyword">` +
+                `<button type="button" class="btn js-vil-add-list">Add</button>` +
+                `</div>`;
+
+            const chipList = wrap.querySelector(".vil-chip-list");
+            (listValues || []).forEach((item) => chipList.appendChild(makeChip(item)));
+            bindChipDeletes(wrap);
+
+            const addBtn = wrap.querySelector(".js-vil-add-list");
+            const addInput = wrap.querySelector(".vil-add-input");
+            const addItem = () => {
+                const text = (addInput.value || "").trim();
+                if (!text) return;
+                chipList.appendChild(makeChip(text));
+                bindChipDeletes(chipList.lastElementChild);
+                addInput.value = "";
+                addInput.focus();
+            };
+            addBtn.addEventListener("click", addItem);
+            addInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    addItem();
+                }
+            });
+            return wrap;
+        }
+
+        function renderStringSection(section, stringValue) {
+            const wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.innerHTML =
+                `<div class="vil-section-head">` +
+                `<h3>${escapeHtml(section.label)}</h3>` +
+                (section.description ? `<p class="muted">${escapeHtml(section.description)}</p>` : "") +
+                `</div>` +
+                `<input class="field" type="text" data-string-key="${escapeHtml(section.key)}" value="${escapeHtml(stringValue || "")}">`;
+            return wrap;
+        }
+
+        function renderDictSection(section, dictValue) {
+            const wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.innerHTML =
+                `<div class="vil-section-head">` +
+                `<h3>${escapeHtml(section.label)}</h3>` +
+                (section.description ? `<p class="muted">${escapeHtml(section.description)}</p>` : "") +
+                `</div>` +
+                `<div class="vil-dict-list" data-dict-key="${escapeHtml(section.key)}"></div>` +
+                `<div class="form-control-row vil-add-row">` +
+                `<input class="field vil-dict-add-k" type="text" placeholder="From column">` +
+                `<input class="field vil-dict-add-v" type="text" placeholder="To name">` +
+                `<button type="button" class="btn js-vil-add-dict">Add</button>` +
+                `</div>`;
+
+            const list = wrap.querySelector(".vil-dict-list");
+
+            function addRow(k, v) {
+                const row = document.createElement("div");
+                row.className = "vil-dict-row form-control-row";
+                row.innerHTML =
+                    `<input class="field vil-dict-k" type="text" value="${escapeHtml(k)}">` +
+                    `<input class="field vil-dict-v" type="text" value="${escapeHtml(v)}">` +
+                    `<button type="button" class="btn danger js-vil-dict-delete">Delete</button>`;
+                row.querySelector(".js-vil-dict-delete").addEventListener("click", () => row.remove());
+                list.appendChild(row);
+            }
+
+            Object.entries(dictValue || {}).forEach(([k, v]) => addRow(k, v));
+
+            wrap.querySelector(".js-vil-add-dict").addEventListener("click", () => {
+                const kInput = wrap.querySelector(".vil-dict-add-k");
+                const vInput = wrap.querySelector(".vil-dict-add-v");
+                const k = (kInput.value || "").trim();
+                const v = (vInput.value || "").trim();
+                if (!k || !v) return;
+                addRow(k, v);
+                kInput.value = "";
+                vInput.value = "";
+            });
+            return wrap;
+        }
+
+        function renderDictOfListsSection(section, dolValue) {
+            const wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.dataset.dolKey = section.key;
+            wrap.setAttribute("data-dol-key", section.key);
+            wrap.innerHTML =
+                `<div class="vil-section-head">` +
+                `<h3>${escapeHtml(section.label)}</h3>` +
+                (section.description ? `<p class="muted">${escapeHtml(section.description)}</p>` : "") +
+                `</div>` +
+                `<div class="vil-dol-groups"></div>`;
+
+            const groupsEl = wrap.querySelector(".vil-dol-groups");
+            Object.entries(dolValue || {}).forEach(([groupKey, items]) => {
+                const group = document.createElement("div");
+                group.className = "vil-dol-group";
+                group.dataset.groupKey = groupKey;
+                group.innerHTML =
+                    `<h4 class="vil-dol-title">${escapeHtml(groupKey)}</h4>` +
+                    `<div class="vil-chip-list"></div>` +
+                    `<div class="form-control-row vil-add-row">` +
+                    `<input class="field vil-add-input" type="text" placeholder="Add NPCI label">` +
+                    `<button type="button" class="btn js-vil-add-list">Add</button>` +
+                    `</div>`;
+                const chipList = group.querySelector(".vil-chip-list");
+                (items || []).forEach((item) => chipList.appendChild(makeChip(item)));
+                bindChipDeletes(group);
+
+                const addBtn = group.querySelector(".js-vil-add-list");
+                const addInput = group.querySelector(".vil-add-input");
+                const addItem = () => {
+                    const text = (addInput.value || "").trim();
+                    if (!text) return;
+                    chipList.appendChild(makeChip(text));
+                    bindChipDeletes(chipList.lastElementChild);
+                    addInput.value = "";
+                };
+                addBtn.addEventListener("click", addItem);
+                addInput.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        addItem();
+                    }
+                });
+                groupsEl.appendChild(group);
+            });
+            return wrap;
+        }
+
+        function renderEditor() {
+            if (!editorEl) return;
+            editorEl.innerHTML = "";
+            schema.forEach((section) => {
+                const value = values[section.key];
+                if (section.type === "list") {
+                    editorEl.appendChild(renderListSection(section, value));
+                } else if (section.type === "string") {
+                    editorEl.appendChild(renderStringSection(section, value));
+                } else if (section.type === "dict") {
+                    editorEl.appendChild(renderDictSection(section, value));
+                } else if (section.type === "dict_of_lists") {
+                    editorEl.appendChild(renderDictOfListsSection(section, value));
+                }
+            });
+        }
+
+        async function loadConfig() {
+            showError("");
+            showSuccess("");
+            setLoading(true);
+            try {
+                const response = await fetch(apiBase);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Failed to load config.");
+                }
+                schema = data.schema || [];
+                values = data.values || {};
+                renderEditor();
+            } catch (err) {
+                showError(err.message || String(err));
+                if (editorEl) editorEl.innerHTML = "";
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function saveConfig() {
+            showError("");
+            showSuccess("");
+            const payload = collectValuesFromDom();
+            setLoading(true);
+            try {
+                const response = await fetch(apiBase, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ values: payload }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Save failed.");
+                }
+                values = data.values || payload;
+                renderEditor();
+                showSuccess("Config saved. Changes apply on the next Valid/Invalid run.");
+            } catch (err) {
+                showError(err.message || String(err));
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function resetConfig() {
+            if (!window.confirm("Reset all Valid/Invalid config sections to built-in defaults?")) {
+                return;
+            }
+            showError("");
+            showSuccess("");
+            setLoading(true);
+            try {
+                const response = await fetch(resetUrl, { method: "POST" });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Reset failed.");
+                }
+                values = data.values || {};
+                renderEditor();
+                showSuccess("Config reset to defaults and saved.");
+            } catch (err) {
+                showError(err.message || String(err));
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        if (modalEl) {
+            modalEl.addEventListener("show.bs.modal", () => {
+                loadConfig();
+            });
+        }
+        if (saveBtn) saveBtn.addEventListener("click", saveConfig);
+        if (resetBtn) resetBtn.addEventListener("click", resetConfig);
+    })();
+</script>

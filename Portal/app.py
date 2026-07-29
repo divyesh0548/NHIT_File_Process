@@ -27,6 +27,30 @@ from Header_Mapping.header_mapping import (
 from header_matching import normalize_header_match
 from Scripts.Life_cycle_merge import _detect_header_row_index, merge_files_in_folder
 
+_VIL_CONFIG_DIR = Path(__file__).resolve().parent / "Scripts" / "valid_invalid_lookup"
+if str(_VIL_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(_VIL_CONFIG_DIR))
+
+from valid_invalid_config import (  # noqa: E402
+    ensure_config_json_exists,
+    get_config_schema_for_api,
+    load_config_values,
+    reset_config_to_defaults,
+    save_config_values,
+)
+
+_VRN_NORM_CONFIG_DIR = Path(__file__).resolve().parent / "Scripts" / "Excempy_Query"
+if str(_VRN_NORM_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(_VRN_NORM_CONFIG_DIR))
+
+from vrn_normalization_config import (  # noqa: E402
+    ensure_config_json_exists as ensure_vrn_normalization_config_json_exists,
+    get_config_schema_for_api as get_vrn_normalization_schema_for_api,
+    load_config_values as load_vrn_normalization_config_values,
+    reset_config_to_defaults as reset_vrn_normalization_config_to_defaults,
+    save_config_values as save_vrn_normalization_config_values,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
@@ -2588,6 +2612,82 @@ def api_delete_lc_etc_header_keyword(keyword_id):
         return jsonify({"ok": True})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/valid-invalid-config", methods=["GET"])
+def api_get_valid_invalid_config():
+    try:
+        ensure_config_json_exists()
+        values, from_file = load_config_values()
+        return jsonify(
+            {
+                "schema": get_config_schema_for_api(),
+                "values": values,
+                "from_file": from_file,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/valid-invalid-config", methods=["PUT"])
+def api_save_valid_invalid_config():
+    payload = request.get_json(silent=True) or {}
+    values = payload.get("values", payload)
+    try:
+        saved = save_config_values(values)
+        return jsonify({"ok": True, "values": saved})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/valid-invalid-config/reset", methods=["POST"])
+def api_reset_valid_invalid_config():
+    try:
+        values = reset_config_to_defaults()
+        return jsonify({"ok": True, "values": values})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/vrn-normalization-config", methods=["GET"])
+def api_get_vrn_normalization_config():
+    try:
+        ensure_vrn_normalization_config_json_exists()
+        values, from_file = load_vrn_normalization_config_values()
+        return jsonify(
+            {
+                "schema": get_vrn_normalization_schema_for_api(),
+                "values": values,
+                "from_file": from_file,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/vrn-normalization-config", methods=["PUT"])
+def api_save_vrn_normalization_config():
+    payload = request.get_json(silent=True) or {}
+    values = payload.get("values", payload)
+    try:
+        saved = save_vrn_normalization_config_values(values)
+        return jsonify({"ok": True, "values": saved})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/vrn-normalization-config/reset", methods=["POST"])
+def api_reset_vrn_normalization_config():
+    try:
+        values = reset_vrn_normalization_config_to_defaults()
+        return jsonify({"ok": True, "values": values})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
