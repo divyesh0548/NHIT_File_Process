@@ -51,6 +51,18 @@ from vrn_normalization_config import (  # noqa: E402
     save_config_values as save_vrn_normalization_config_values,
 )
 
+_PASS_CONFIG_DIR = Path(__file__).resolve().parent / "Scripts" / "Excempy_Query" / "Final_7_scripts"
+if str(_PASS_CONFIG_DIR) not in sys.path:
+    sys.path.insert(0, str(_PASS_CONFIG_DIR))
+
+from pass_config import (  # noqa: E402
+    ensure_config_json_exists as ensure_pass_config_json_exists,
+    get_config_schema_for_api as get_pass_config_schema_for_api,
+    load_config_values as load_pass_config_values,
+    reset_config_to_defaults as reset_pass_config_to_defaults,
+    save_config_values as save_pass_config_values,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
@@ -106,7 +118,7 @@ FINAL_EXEMPT_REQUIRED_SEMI_COLUMNS = {
     "Description",
     "TC Class",
 }
-FINAL_EXEMPT_PASS_ALLOWED_EXTENSIONS = {".xls", ".xlsx"}
+FINAL_EXEMPT_PASS_ALLOWED_EXTENSIONS = {".xls", ".xlsx", ".csv"}
 
 # Backward-compatible names used in process state and routing checks
 LIFE_CYCLE_PROCESS_FOLDER = LIFE_CYCLE_SUBPROCESS_FOLDER
@@ -1731,7 +1743,7 @@ def process_final_exempt_files(process_name):
     if not semi_file:
         return False, "A semi-final CSV is required. Upload one or import a Merge + Remove Duplicate output."
     if not pass_files:
-        return False, "Upload at least one .xls or .xlsx pass file before starting."
+        return False, "Upload at least one .xls, .xlsx, or .csv pass file before starting."
 
     valid_semi, semi_error = _validate_final_exempt_semi_file(semi_file)
     if not valid_semi:
@@ -1818,8 +1830,30 @@ def process_final_exempt_files(process_name):
         pass_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return False, "Pass separation did not produce its validation summary."
+
+    warnings = pass_summary.get("warnings") or []
+    warning_hint = ""
+    if warnings:
+        # Surface the first concrete sheet warning so the user knows what failed.
+        warning_hint = f" Detail: {warnings[0]}"
+
+    if not pass_summary.get("header_detected"):
+        scan_rows = pass_summary.get("header_scan_rows", 25)
+        min_matches = pass_summary.get("min_header_matches", 3)
+        keywords = pass_summary.get("header_keywords") or []
+        keyword_text = ", ".join(keywords) if keywords else "configured pass header keywords"
+        return False, (
+            f"Pass file header was not detected in the first {scan_rows} rows "
+            f"(need at least {min_matches} matching keywords from: {keyword_text}). "
+            f"Check that the pass report includes a real header row."
+            f"{warning_hint}"
+        )
     if not pass_summary.get("pass_type_detected"):
-        return False, "No Pass Type column was found in the uploaded pass files. Use a supported pass report and try again."
+        return False, (
+            "Pass Type column was not found in the detected pass-file header. "
+            "Use a supported pass report with a Pass Type column and try again."
+            f"{warning_hint}"
+        )
     if not pass_summary.get("mp_rows"):
         return False, "Pass separation found 0 MP rows. MP passes are required for this process."
     has_lt = bool(pass_summary.get("lt_rows"))
@@ -2692,6 +2726,44 @@ def api_reset_vrn_normalization_config():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/pass-separator-config", methods=["GET"])
+def api_get_pass_separator_config():
+    try:
+        ensure_pass_config_json_exists()
+        values, from_file = load_pass_config_values()
+        return jsonify(
+            {
+                "schema": get_pass_config_schema_for_api(),
+                "values": values,
+                "from_file": from_file,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/pass-separator-config", methods=["PUT"])
+def api_save_pass_separator_config():
+    payload = request.get_json(silent=True) or {}
+    values = payload.get("values", payload)
+    try:
+        saved = save_pass_config_values(values)
+        return jsonify({"ok": True, "values": saved})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/pass-separator-config/reset", methods=["POST"])
+def api_reset_pass_separator_config():
+    try:
+        values = reset_pass_config_to_defaults()
+        return jsonify({"ok": True, "values": values})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/merge-normalize", methods=["GET", "POST"])
 def merge_normalize():
     messages = []
@@ -3122,7 +3194,7 @@ def final_exempt_process():
                         continue
                     filename = secure_filename(pass_upload.filename)
                     if not allowed_final_exempt_pass_file(filename):
-                        messages.append(("error", f"Pass file must be .xls or .xlsx: {filename or 'unnamed file'}"))
+                        messages.append(("error", f"Pass file must be .xls, .xlsx, or .csv: {filename or 'unnamed file'}"))
                         continue
                     destination = pass_dir / filename
                     suffix = 2

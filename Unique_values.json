@@ -1,0 +1,17 @@
+{
+  "folder": "C:\\Divyesh\\NHIT_File_process\\Exempt Query\\Madai base files\\pass",
+  "column": "Pass Type",
+  "distinct_count": 2,
+  "values": [
+    {
+      "Value": "LT",
+      "File Count": 3,
+      "Files": "Pass Issuance Report April-2026.csv, Pass Issuance Report June-2026.csv, Pass Issuance Report May-2026.csv"
+    },
+    {
+      "Value": "MP",
+      "File Count": 3,
+      "Files": "Pass Issuance Report April-2026.csv, Pass Issuance Report June-2026.csv, Pass Issuance Report May-2026.csv"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
-  "source_file_count": 9,
-  "processed_sheet_count": 9,
+  "source_file_count": 3,
+  "processed_sheet_count": 3,
   "header_detected": true,
   "pass_type_detected": true,
   "sheets_no_header": 0,
@@ -33,7 +33,7 @@
     "Local Commercial Tariff 50%",
     "50 % discount for local Comm"
   ],
-  "mp_rows": 935,
-  "lt_rows": 0,
+  "mp_rows": 204,
+  "lt_rows": 40,
   "warnings": []
 }

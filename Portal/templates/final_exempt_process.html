@@ -9,10 +9,13 @@
         <h1>{{ final_exempt_group_label }}</h1>
         <p>Process a deduplicated semi-final CSV and mixed pass reports into the final Excel workbook.</p>
     </div>
-    <div class="actions" style="margin-top: 0;">
+    <div class="actions" style="margin-top: 0; gap: 8px;">
+        <button class="btn secondary" data-bs-toggle="modal" data-bs-target="#passSeparatorConfigModal">Pass Config</button>
         <a class="btn secondary" href="{{ url_for('exempt_query_hub') }}">Back to Exempt Query</a>
     </div>
 </section>
+
+{% include "partials/pass_separator_config_modal.html" %}
 
 {% if messages %}
     <div class="message-list">
@@ -92,9 +95,9 @@
 
                     <div class="card" style="padding: 16px;">
                         <h3 style="margin-bottom: 10px;">Pass files</h3>
-                        <p class="muted">Upload one or more monthly pass reports in .xls or .xlsx format. They are merged before MP/LT separation.</p>
+                        <p class="muted">Upload one or more monthly pass reports in .xls, .xlsx, or .csv format. They are merged before MP/LT separation.</p>
                         <label for="pass_files" class="muted">Pass reports</label>
-                        <input id="pass_files" class="file-input" type="file" name="pass_files" accept=".xls,.xlsx" multiple>
+                        <input id="pass_files" class="file-input" type="file" name="pass_files" accept=".xls,.xlsx,.csv" multiple>
                     </div>
 
                     <div class="form-control-row">

@@ -1,0 +1,207 @@
+<div class="modal fade" id="passSeparatorConfigModal" tabindex="-1" aria-labelledby="passSeparatorConfigModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content header-keywords-modal">
+            <div class="modal-header">
+                <h5 class="modal-title" id="passSeparatorConfigModalLabel">Pass Separator Config</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="muted">
+                    Edit keyword lists used for pass-file header detection, column matching, and MP/LT separation.
+                    Changes apply on the next Final Exempt Process run.
+                </p>
+                <div id="pass-cfg-error" class="message error" style="display: none; margin-bottom: 14px;"></div>
+                <div id="pass-cfg-success" class="message success" style="display: none; margin-bottom: 14px;"></div>
+                <div id="pass-cfg-loading" class="keywords-loading" aria-live="polite">
+                    <div class="keywords-loading-spinner" role="status" aria-label="Loading pass separator config"></div>
+                    <p class="muted">Loading pass separator config…</p>
+                </div>
+                <div id="pass-cfg-editor" class="vil-config-editor" style="display: none;"></div>
+            </div>
+            <div class="modal-footer" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn secondary" id="pass-cfg-reset-btn">Reset to defaults</button>
+                <div style="flex: 1;"></div>
+                <button type="button" class="btn secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn" id="pass-cfg-save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const apiBase = "{{ url_for('api_get_pass_separator_config') }}";
+        const resetUrl = "{{ url_for('api_reset_pass_separator_config') }}";
+        const modalEl = document.getElementById("passSeparatorConfigModal");
+        const editorEl = document.getElementById("pass-cfg-editor");
+        const loadingEl = document.getElementById("pass-cfg-loading");
+        const errorEl = document.getElementById("pass-cfg-error");
+        const successEl = document.getElementById("pass-cfg-success");
+        const saveBtn = document.getElementById("pass-cfg-save-btn");
+        const resetBtn = document.getElementById("pass-cfg-reset-btn");
+
+        let schema = [];
+        let values = {};
+
+        function showError(message) {
+            if (!errorEl) return;
+            errorEl.textContent = message || "";
+            errorEl.style.display = message ? "block" : "none";
+        }
+        function showSuccess(message) {
+            if (!successEl) return;
+            successEl.textContent = message || "";
+            successEl.style.display = message ? "block" : "none";
+        }
+        function setLoading(loading) {
+            if (loadingEl) loadingEl.style.display = loading ? "flex" : "none";
+            if (editorEl) editorEl.style.display = loading ? "none" : "";
+            if (saveBtn) saveBtn.disabled = loading;
+            if (resetBtn) resetBtn.disabled = loading;
+        }
+        function escapeHtml(text) {
+            return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        function collectValuesFromDom() {
+            const next = {};
+            schema.forEach(function (section) {
+                if (section.type === "list") {
+                    const items = [];
+                    editorEl.querySelectorAll('[data-list-key="' + CSS.escape(section.key) + '"] .vil-chip-text').forEach(function (el) {
+                        var text = el.textContent || "";
+                        if (text.trim()) items.push(text);
+                    });
+                    next[section.key] = items;
+                } else if (section.type === "integer") {
+                    var input = editorEl.querySelector('[data-int-key="' + CSS.escape(section.key) + '"]');
+                    next[section.key] = input ? parseInt(input.value, 10) || 0 : values[section.key];
+                }
+            });
+            return next;
+        }
+
+        function makeChip(text) {
+            var chip = document.createElement("span");
+            chip.className = "vil-chip";
+            chip.innerHTML =
+                '<span class="vil-chip-text">' + escapeHtml(text) + '</span>' +
+                '<button type="button" class="btn danger js-vil-chip-delete" aria-label="Remove">\u00d7</button>';
+            return chip;
+        }
+        function bindChipDeletes(root) {
+            root.querySelectorAll(".js-vil-chip-delete").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var chip = btn.closest(".vil-chip");
+                    if (chip) chip.remove();
+                });
+            });
+        }
+
+        function renderListSection(section, listValues) {
+            var wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.innerHTML =
+                '<div class="vil-section-head">' +
+                '<h3>' + escapeHtml(section.label) + '</h3>' +
+                (section.description ? '<p class="muted">' + escapeHtml(section.description) + '</p>' : '') +
+                '</div>' +
+                '<div class="vil-chip-list" data-list-key="' + escapeHtml(section.key) + '"></div>' +
+                '<div class="form-control-row vil-add-row">' +
+                '<input class="field vil-add-input" type="text" placeholder="Add keyword">' +
+                '<button type="button" class="btn js-vil-add-list">Add</button>' +
+                '</div>';
+            var chipList = wrap.querySelector(".vil-chip-list");
+            (listValues || []).forEach(function (item) { chipList.appendChild(makeChip(item)); });
+            bindChipDeletes(wrap);
+            var addBtn = wrap.querySelector(".js-vil-add-list");
+            var addInput = wrap.querySelector(".vil-add-input");
+            var addItem = function () {
+                var text = addInput.value || "";
+                if (!text.trim()) return;
+                chipList.appendChild(makeChip(text));
+                bindChipDeletes(chipList.lastElementChild);
+                addInput.value = "";
+                addInput.focus();
+            };
+            addBtn.addEventListener("click", addItem);
+            addInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addItem(); } });
+            return wrap;
+        }
+
+        function renderIntegerSection(section, value) {
+            var wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.innerHTML =
+                '<div class="vil-section-head">' +
+                '<h3>' + escapeHtml(section.label) + '</h3>' +
+                (section.description ? '<p class="muted">' + escapeHtml(section.description) + '</p>' : '') +
+                '</div>' +
+                '<input class="field" type="number" min="1" data-int-key="' + escapeHtml(section.key) + '" value="' + (value || 1) + '" style="max-width:140px;">';
+            return wrap;
+        }
+
+        function renderEditor() {
+            if (!editorEl) return;
+            editorEl.innerHTML = "";
+            schema.forEach(function (section) {
+                if (section.type === "list") {
+                    editorEl.appendChild(renderListSection(section, values[section.key]));
+                } else if (section.type === "integer") {
+                    editorEl.appendChild(renderIntegerSection(section, values[section.key]));
+                }
+            });
+        }
+
+        async function loadConfig() {
+            showError(""); showSuccess(""); setLoading(true);
+            try {
+                var response = await fetch(apiBase);
+                var data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Failed to load config.");
+                schema = data.schema || [];
+                values = data.values || {};
+                renderEditor();
+            } catch (err) {
+                showError(err.message || String(err));
+                if (editorEl) editorEl.innerHTML = "";
+            } finally { setLoading(false); }
+        }
+
+        async function saveConfig() {
+            showError(""); showSuccess(""); setLoading(true);
+            try {
+                var payload = collectValuesFromDom();
+                var response = await fetch(apiBase, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ values: payload }),
+                });
+                var data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Save failed.");
+                values = data.values || payload;
+                renderEditor();
+                showSuccess("Pass separator config saved. Changes apply on the next run.");
+            } catch (err) { showError(err.message || String(err)); }
+            finally { setLoading(false); }
+        }
+
+        async function resetConfig() {
+            if (!window.confirm("Reset all pass separator settings to built-in defaults?")) return;
+            showError(""); showSuccess(""); setLoading(true);
+            try {
+                var response = await fetch(resetUrl, { method: "POST" });
+                var data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Reset failed.");
+                values = data.values || {};
+                renderEditor();
+                showSuccess("Pass separator config reset to defaults and saved.");
+            } catch (err) { showError(err.message || String(err)); }
+            finally { setLoading(false); }
+        }
+
+        if (modalEl) modalEl.addEventListener("show.bs.modal", function () { loadConfig(); });
+        if (saveBtn) saveBtn.addEventListener("click", saveConfig);
+        if (resetBtn) resetBtn.addEventListener("click", resetConfig);
+    })();
+</script>

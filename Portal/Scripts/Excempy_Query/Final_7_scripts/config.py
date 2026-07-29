@@ -93,28 +93,49 @@ def get_local_code():
         return ()
 
 
-# ====== Pass file column aliases (MP / LT working files) ======
-PASS_CHASSIS_COLUMN_NAMES = [
-    "Chassis/ Vehicle No",
-    "Chassis/Vehicle No",
-    "Chassis Vehicle No",
-    "Vehicle No",
-]
+# ====== Pass file column aliases & type values (loaded from JSON with defaults) ======
+from pass_config import load_config_values as _load_pass_config
 
-PASS_START_DATE_COLUMN_NAMES = [
-    "Start Date",
-    "Start Effective Date",
-]
 
-PASS_END_DATE_COLUMN_NAMES = [
-    "End Date",
-    "End Effective Date",
-]
+def _pass_cfg():
+    cfg, _from_file = _load_pass_config()
+    return cfg
+
+
+_PASS_CFG = _pass_cfg()
+
+PASS_CHASSIS_COLUMN_NAMES = _PASS_CFG["PASS_CHASSIS_COLUMN_NAMES"]
+PASS_START_DATE_COLUMN_NAMES = _PASS_CFG["PASS_START_DATE_COLUMN_NAMES"]
+PASS_END_DATE_COLUMN_NAMES = _PASS_CFG["PASS_END_DATE_COLUMN_NAMES"]
+MP_PASS_TYPE_VALUES = _PASS_CFG["MP_PASS_TYPE_VALUES"]
+LT_PASS_TYPE_VALUES = _PASS_CFG["LT_PASS_TYPE_VALUES"]
 
 
 def _normalize_pass_col_name(col) -> str:
     s = str(col).strip().lower()
     return "".join(s.split())
+
+
+def normalize_pass_type_value(value) -> str:
+    """Normalize a Pass Type cell for alias matching (strip, casefold, no spaces)."""
+    if value is None:
+        return ""
+    try:
+        import pandas as pd
+
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return "".join(str(value).strip().casefold().split())
+
+
+def mp_pass_type_normalized_set():
+    return {normalize_pass_type_value(v) for v in MP_PASS_TYPE_VALUES if normalize_pass_type_value(v)}
+
+
+def lt_pass_type_normalized_set():
+    return {normalize_pass_type_value(v) for v in LT_PASS_TYPE_VALUES if normalize_pass_type_value(v)}
 
 
 def find_pass_file_column(df, candidates, label: str) -> str:
