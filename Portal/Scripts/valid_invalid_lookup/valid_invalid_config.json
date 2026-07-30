@@ -51,6 +51,27 @@
     "Local Conti/Local Single": "Local Conti/Single",
     "Return Journey": "Cont. Journey"
   },
+  "RATE_SHEET_ID_COLUMN_ALIASES": {
+    "TC Class": [
+      "TCClass",
+      "TC_Class",
+      "T C Class",
+      "Vehicle TC Class"
+    ],
+    "Weight/Capacity": [
+      "Weight Capacity",
+      "Weight/Capacity (Kgs)",
+      "Weight Capacity (Kgs)",
+      "Weight",
+      "Capacity"
+    ],
+    "Vehicle Class": [
+      "VehicleClass",
+      "Veh Class",
+      "Vehicle Class Desc",
+      "Veh. Class"
+    ]
+  },
   "LIFECYCLE_EXCLUDED_VEHICLE_CLASSES": [
     "BUS",
     "BUS",

@@ -80,6 +80,29 @@ _DEFAULT_VALUES: Dict[str, Any] = {
         "Return Journey": "Cont. Journey",
         "Local Conti/Local Single": "Local Conti/Single",
     },
+    # Aliases for the three fixed identity columns on the rates sheet.
+    # Canonical keys cannot be removed; users add alternate header spellings under each.
+    "RATE_SHEET_ID_COLUMN_ALIASES": {
+        "TC Class": [
+            "TCClass",
+            "TC_Class",
+            "T C Class",
+            "Vehicle TC Class",
+        ],
+        "Weight/Capacity": [
+            "Weight Capacity",
+            "Weight/Capacity (Kgs)",
+            "Weight Capacity (Kgs)",
+            "Weight",
+            "Capacity",
+        ],
+        "Vehicle Class": [
+            "VehicleClass",
+            "Veh Class",
+            "Vehicle Class Desc",
+            "Veh. Class",
+        ],
+    },
     "LIFECYCLE_EXCLUDED_VEHICLE_CLASSES": [
         "BUS",
         " BUS",
@@ -248,57 +271,72 @@ CONFIG_SCHEMA: Dict[str, Dict[str, Any]] = {
     },
     "RATE_SHEET_JOURNEY_COLUMN_RENAMES": {
         "type": "dict",
-        "label": "Rate sheet column renames",
-        "description": "Wide rate-sheet column name → Attribute name.",
+        "label": "Rate sheet journey column renames",
+        "description": (
+            "Map any rates-sheet journey column name → canonical Attribute: "
+            '"Single Journey", "Cont. Journey", or "Local Conti/Single". '
+            "Add a row when a plaza uses a different header (e.g. "
+            '"Local Conti/Local Single" → "Local Conti/Single").'
+        ),
         "order": 6,
         "editable_keys": True,
+    },
+    "RATE_SHEET_ID_COLUMN_ALIASES": {
+        "type": "dict_of_lists",
+        "label": "Rate sheet ID column aliases",
+        "description": (
+            "Aliases for the three rates identity columns. Canonical keys are fixed; "
+            "add alternate spellings under TC Class, Weight/Capacity, and Vehicle Class."
+        ),
+        "order": 7,
+        "editable_keys": False,
     },
     "LIFECYCLE_EXCLUDED_VEHICLE_CLASSES": {
         "type": "list",
         "label": "Lifecycle excluded vehicle classes",
         "description": "Excluded from non-bus lifecycle processing.",
-        "order": 7,
+        "order": 8,
     },
     "BUS_VEHICLE_CLASSES": {
         "type": "list",
         "label": "Bus vehicle classes",
-        "order": 8,
+        "order": 9,
     },
     "HEAVY_SPECIAL_VEHICLE_CLASSES": {
         "type": "list",
         "label": "Heavy / special vehicle classes",
         "description": "Use MAV Rate 1 by journey type.",
-        "order": 9,
+        "order": 10,
     },
     "CRANE_MOUNTED_VEHICLE_CLASS": {
         "type": "string",
         "label": "Crane mounted vehicle class",
         "description": "Uses LCV Rate 1 instead of MAV.",
-        "order": 10,
+        "order": 11,
     },
     "NPCI_TO_TC_CLASS": {
         "type": "dict_of_lists",
         "label": "NPCI → TC class mapping",
         "description": "TC class keys are fixed; edit NPCI labels under each.",
-        "order": 11,
+        "order": 12,
         "editable_keys": False,
     },
     "ZERO_SETTLEMENT_REMOVE_JOURNEY_TYPES": {
         "type": "list",
         "label": "Zero-settlement journey types to remove",
-        "order": 12,
+        "order": 13,
     },
     "DISCOUNT_PASS_JOURNEY_TYPES": {
         "type": "list",
         "label": "Discount / pass journey types",
         "description": "Override settlement with Single Journey rate.",
-        "order": 13,
+        "order": 14,
     },
     "INVALID_EXCLUDED_VEHICLE_CLASSES": {
         "type": "list",
         "label": "Invalid excluded vehicle classes",
         "description": "Dropped from final invalid export.",
-        "order": 14,
+        "order": 15,
     },
 }
 
@@ -515,6 +553,7 @@ def _apply_values_to_module(values: Dict[str, Any]) -> None:
             "UPDATED_JOURNEY_TYPE_CONT": UPDATED_JOURNEY_TYPE_CONT,
             "UPDATED_JOURNEY_TYPE_SINGLE": UPDATED_JOURNEY_TYPE_SINGLE,
             "RATE_SHEET_JOURNEY_COLUMN_RENAMES": values["RATE_SHEET_JOURNEY_COLUMN_RENAMES"],
+            "RATE_SHEET_ID_COLUMN_ALIASES": values["RATE_SHEET_ID_COLUMN_ALIASES"],
             "LIFECYCLE_EXCLUDED_VEHICLE_CLASSES": values["LIFECYCLE_EXCLUDED_VEHICLE_CLASSES"],
             "BUS_VEHICLE_CLASSES": values["BUS_VEHICLE_CLASSES"],
             "HEAVY_SPECIAL_VEHICLE_CLASSES": values["HEAVY_SPECIAL_VEHICLE_CLASSES"],

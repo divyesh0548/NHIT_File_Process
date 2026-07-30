@@ -1,0 +1,242 @@
+<div class="modal fade" id="lcNormalizationConfigModal" tabindex="-1" aria-labelledby="lcNormalizationConfigModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content header-keywords-modal">
+            <div class="modal-header">
+                <h5 class="modal-title" id="lcNormalizationConfigModalLabel">LC/ETC Normalization Config</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="muted">
+                    Edit LC/ETC-only header alias lists used by Merge + Normalize.
+                    Group names are fixed; you can add or delete aliases inside each group.
+                </p>
+                <div id="lc-norm-config-error" class="message error" style="display: none; margin-bottom: 14px;"></div>
+                <div id="lc-norm-config-success" class="message success" style="display: none; margin-bottom: 14px;"></div>
+                <div id="lc-norm-config-loading" class="keywords-loading" aria-live="polite">
+                    <div class="keywords-loading-spinner" role="status" aria-label="Loading LC normalization config"></div>
+                    <p class="muted">Loading LC/ETC normalization config…</p>
+                </div>
+                <div id="lc-norm-config-editor" class="vil-config-editor" style="display: none;"></div>
+            </div>
+            <div class="modal-footer" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn secondary" id="lc-norm-config-reset-btn">Reset to defaults</button>
+                <div style="flex: 1;"></div>
+                <button type="button" class="btn secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn" id="lc-norm-config-save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const apiBase = "{{ url_for('api_get_lc_normalization_config') }}";
+        const resetUrl = "{{ url_for('api_reset_lc_normalization_config') }}";
+        const modalEl = document.getElementById("lcNormalizationConfigModal");
+        const editorEl = document.getElementById("lc-norm-config-editor");
+        const loadingEl = document.getElementById("lc-norm-config-loading");
+        const errorEl = document.getElementById("lc-norm-config-error");
+        const successEl = document.getElementById("lc-norm-config-success");
+        const saveBtn = document.getElementById("lc-norm-config-save-btn");
+        const resetBtn = document.getElementById("lc-norm-config-reset-btn");
+
+        let schema = [];
+        let values = {};
+
+        function showError(message) {
+            if (!errorEl) return;
+            if (!message) {
+                errorEl.style.display = "none";
+                errorEl.textContent = "";
+                return;
+            }
+            errorEl.textContent = message;
+            errorEl.style.display = "block";
+        }
+
+        function showSuccess(message) {
+            if (!successEl) return;
+            if (!message) {
+                successEl.style.display = "none";
+                successEl.textContent = "";
+                return;
+            }
+            successEl.textContent = message;
+            successEl.style.display = "block";
+        }
+
+        function setLoading(loading) {
+            if (loadingEl) loadingEl.style.display = loading ? "flex" : "none";
+            if (editorEl) editorEl.style.display = loading ? "none" : "";
+            if (saveBtn) saveBtn.disabled = loading;
+            if (resetBtn) resetBtn.disabled = loading;
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        function chipText(el) {
+            const text = el.textContent || "";
+            return text.trim() === "" ? "" : text;
+        }
+
+        function collectValuesFromDom() {
+            const next = {};
+            schema.forEach((section) => {
+                const items = [];
+                editorEl.querySelectorAll(`[data-list-key="${CSS.escape(section.key)}"] .vil-chip-text`).forEach((el) => {
+                    const text = chipText(el);
+                    if (text) items.push(text);
+                });
+                next[section.key] = items;
+            });
+            return next;
+        }
+
+        function bindChipDeletes(root) {
+            root.querySelectorAll(".js-vil-chip-delete").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const chip = btn.closest(".vil-chip");
+                    if (chip) chip.remove();
+                });
+            });
+        }
+
+        function makeChip(text) {
+            const chip = document.createElement("span");
+            chip.className = "vil-chip";
+            chip.innerHTML =
+                `<span class="vil-chip-text">${escapeHtml(text)}</span>` +
+                `<button type="button" class="btn danger js-vil-chip-delete" aria-label="Remove">×</button>`;
+            return chip;
+        }
+
+        function renderListSection(section, listValues) {
+            const wrap = document.createElement("div");
+            wrap.className = "vil-section";
+            wrap.innerHTML =
+                `<div class="vil-section-head">` +
+                `<h3>${escapeHtml(section.label)}</h3>` +
+                (section.description ? `<p class="muted">${escapeHtml(section.description)}</p>` : "") +
+                `</div>` +
+                `<div class="vil-chip-list" data-list-key="${escapeHtml(section.key)}"></div>` +
+                `<div class="form-control-row vil-add-row">` +
+                `<input class="field vil-add-input" type="text" placeholder="Add alias">` +
+                `<button type="button" class="btn js-vil-add-list">Add</button>` +
+                `</div>`;
+
+            const chipList = wrap.querySelector(".vil-chip-list");
+            (listValues || []).forEach((item) => chipList.appendChild(makeChip(item)));
+            bindChipDeletes(wrap);
+
+            const addBtn = wrap.querySelector(".js-vil-add-list");
+            const addInput = wrap.querySelector(".vil-add-input");
+            const addItem = () => {
+                const text = addInput.value || "";
+                if (text.trim() === "") return;
+                chipList.appendChild(makeChip(text));
+                bindChipDeletes(chipList.lastElementChild);
+                addInput.value = "";
+                addInput.focus();
+            };
+            addBtn.addEventListener("click", addItem);
+            addInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    addItem();
+                }
+            });
+            return wrap;
+        }
+
+        function renderEditor() {
+            if (!editorEl) return;
+            editorEl.innerHTML = "";
+            schema.forEach((section) => {
+                editorEl.appendChild(renderListSection(section, values[section.key]));
+            });
+        }
+
+        async function loadConfig() {
+            showError("");
+            showSuccess("");
+            setLoading(true);
+            try {
+                const response = await fetch(apiBase);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Failed to load LC/ETC normalization config.");
+                }
+                schema = data.schema || [];
+                values = data.values || {};
+                renderEditor();
+            } catch (err) {
+                showError(err.message || String(err));
+                if (editorEl) editorEl.innerHTML = "";
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function saveConfig() {
+            showError("");
+            showSuccess("");
+            const payload = collectValuesFromDom();
+            setLoading(true);
+            try {
+                const response = await fetch(apiBase, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ values: payload }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Save failed.");
+                }
+                values = data.values || payload;
+                renderEditor();
+                showSuccess("LC/ETC normalization config saved. Changes apply on the next LC/ETC Merge + Normalize run.");
+            } catch (err) {
+                showError(err.message || String(err));
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function resetConfig() {
+            if (!window.confirm("Reset all LC/ETC normalization groups to built-in defaults?")) {
+                return;
+            }
+            showError("");
+            showSuccess("");
+            setLoading(true);
+            try {
+                const response = await fetch(resetUrl, { method: "POST" });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Reset failed.");
+                }
+                values = data.values || {};
+                renderEditor();
+                showSuccess("LC/ETC normalization config reset to defaults and saved.");
+            } catch (err) {
+                showError(err.message || String(err));
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        if (modalEl) {
+            modalEl.addEventListener("show.bs.modal", () => {
+                loadConfig();
+            });
+        }
+        if (saveBtn) saveBtn.addEventListener("click", saveConfig);
+        if (resetBtn) resetBtn.addEventListener("click", resetConfig);
+    })();
+</script>

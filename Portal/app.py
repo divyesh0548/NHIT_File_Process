@@ -51,6 +51,14 @@ from vrn_normalization_config import (  # noqa: E402
     save_config_values as save_vrn_normalization_config_values,
 )
 
+from lc_normalization_config import (  # noqa: E402
+    ensure_config_json_exists as ensure_lc_normalization_config_json_exists,
+    get_config_schema_for_api as get_lc_normalization_schema_for_api,
+    load_config_values as load_lc_normalization_config_values,
+    reset_config_to_defaults as reset_lc_normalization_config_to_defaults,
+    save_config_values as save_lc_normalization_config_values,
+)
+
 _PASS_CONFIG_DIR = Path(__file__).resolve().parent / "Scripts" / "Excempy_Query" / "Final_7_scripts"
 if str(_PASS_CONFIG_DIR) not in sys.path:
     sys.path.insert(0, str(_PASS_CONFIG_DIR))
@@ -2721,6 +2729,44 @@ def api_save_vrn_normalization_config():
 def api_reset_vrn_normalization_config():
     try:
         values = reset_vrn_normalization_config_to_defaults()
+        return jsonify({"ok": True, "values": values})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/lc-normalization-config", methods=["GET"])
+def api_get_lc_normalization_config():
+    try:
+        ensure_lc_normalization_config_json_exists()
+        values, from_file = load_lc_normalization_config_values()
+        return jsonify(
+            {
+                "schema": get_lc_normalization_schema_for_api(),
+                "values": values,
+                "from_file": from_file,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/lc-normalization-config", methods=["PUT"])
+def api_save_lc_normalization_config():
+    payload = request.get_json(silent=True) or {}
+    values = payload.get("values", payload)
+    try:
+        saved = save_lc_normalization_config_values(values)
+        return jsonify({"ok": True, "values": saved})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/lc-normalization-config/reset", methods=["POST"])
+def api_reset_lc_normalization_config():
+    try:
+        values = reset_lc_normalization_config_to_defaults()
         return jsonify({"ok": True, "values": values})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

@@ -27,6 +27,7 @@ from valid_invalid_config import (
     INVALID_EXCLUDED_VEHICLE_CLASSES,
     JOURNEY_TYPES_TO_DROP,
     LIFECYCLE_EXCLUDED_VEHICLE_CLASSES,
+    RATE_SHEET_ID_COLUMN_ALIASES,
     RATE_SHEET_JOURNEY_COLUMN_RENAMES,
     STATUS_COLUMN_CANDIDATES,
     UPDATED_JOURNEY_TYPE_CONT,
@@ -244,8 +245,59 @@ def process_vehicle(lifecycle_input_path):
     return df_final
 
 
+def _resolve_rates_id_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename rates-sheet identity columns to canonical TC Class / Weight/Capacity / Vehicle Class."""
+    aliases = RATE_SHEET_ID_COLUMN_ALIASES or {}
+    canonical_names = ("TC Class", "Weight/Capacity", "Vehicle Class")
+    norm_to_col = {normalize_header_match(col): col for col in df.columns}
+    rename: dict = {}
+    missing = []
+
+    for canonical in canonical_names:
+        candidates = [canonical] + list(aliases.get(canonical, []))
+        found = None
+        for candidate in candidates:
+            key = normalize_header_match(candidate)
+            if key in norm_to_col:
+                found = norm_to_col[key]
+                break
+        if found is None:
+            missing.append(canonical)
+            continue
+        if found != canonical:
+            rename[found] = canonical
+
+    if missing:
+        raise KeyError(
+            "Rates sheet is missing required identity column(s): "
+            f"{missing}. Tried aliases from RATE_SHEET_ID_COLUMN_ALIASES. "
+            f"Available columns: {list(df.columns)}"
+        )
+    return df.rename(columns=rename) if rename else df
+
+
+def _resolve_rates_journey_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename journey-rate columns using RATE_SHEET_JOURNEY_COLUMN_RENAMES (normalized match)."""
+    id_cols = {"TC Class", "Weight/Capacity", "Vehicle Class"}
+    # source_norm → canonical Attribute name
+    rename_lookup = {
+        normalize_header_match(src): dest
+        for src, dest in (RATE_SHEET_JOURNEY_COLUMN_RENAMES or {}).items()
+        if src and dest
+    }
+    rename: dict = {}
+    for col in df.columns:
+        if col in id_cols:
+            continue
+        dest = rename_lookup.get(normalize_header_match(col))
+        if dest and dest != col:
+            rename[col] = dest
+    return df.rename(columns=rename) if rename else df
+
+
 def rates(df):
-    df = df.rename(columns=RATE_SHEET_JOURNEY_COLUMN_RENAMES)
+    df = _resolve_rates_id_columns(df)
+    df = _resolve_rates_journey_columns(df)
     return df.melt(id_vars=["TC Class", "Weight/Capacity", "Vehicle Class"], var_name="Attribute")
 
 

@@ -22,6 +22,7 @@ from openpyxl import load_workbook
 from win32com.client import DispatchEx
 
 from merge_files import merge_files_in_folder
+from lc_normalization_config import get_normalization_groups
 
 BASE_DIR = Path(__file__).resolve().parent
 _DEFAULT_INPUT_FOLDER = BASE_DIR / "Daroda_lc_vrn_files/etc"
@@ -46,77 +47,6 @@ MERGE_HEADER_KEYWORDS = list(OUTPUT_HEADERS)
 XLSX_STREAM_MAX_ROWS = 1_048_576
 XLSX_STREAM_TAIL_EMPTY_ROWS = 200
 
-HEADER_GROUPS = {
-    "Date & Time": [
-        "DATE",
-        "Date Time",
-        "Reader Read Time",
-        "DATETIME",
-        "DATE TIME",
-        "Date/Time",
-        "Transaction Date",
-        "Txn Date",
-        "TXN DATE",
-    ],
-    "Settlement Type": [
-        "SettlementType",
-        "SETTLEMENT TYPE",
-        "Settlement",
-    ],
-    "Transaction Status": [
-        "Transaction Status",
-        "TRANSACTION STATUS",
-        "TransactionStatus",
-        "Txn Status",
-    ],
-    "Veh Reg No.": [
-        "TC_VEH_REG_NO",
-        "Vehicle Reg. No.",
-        "Vehicle Reg. No",
-        "VEHICLE_REG_NO",
-        "veh_reg_no_",
-        "Veh Reg No.",
-        "VEH REG NO",
-        "TC VEH REG NO",
-        "VEH. REG. NO.",
-        "Licence Plate No",
-        "VRN",
-        "Licence Plate No.",
-        "Plate No",
-        "NPCI VRN",
-        "Veh Reg Num",
-        "VehicleNumber",
-        "VEH_REG_NO",
-        "Platenumber",
-        "Vehicle Registration Number",
-        "vehicle_reg_no",
-        "Vehicle No",
-    ],
-    "MOP": [
-        "PAYMENT_TYPE",
-        "Payment Method",
-        "MVC MOP",
-        "PAYMENT TYPE",
-        "Payment",
-        "Mode",
-        "Ticket_Type",
-        "MVC_TLC_MOP",
-        "TransactionTypeTC",
-        "PaymentMeans",
-        "PAYMENT METHOD",
-        "MVC (TLC MOP)",
-        "MVC TLC MOP",
-    ],
-    "Lane No": [
-        "LANE NO",
-        "LaneNo",
-        "Lane ID",
-        "Lane Number",
-        "LANE_NUMBER",
-        "Lane",
-    ],
-}
-
 
 def normalize_text(value) -> str:
     if value is None:
@@ -137,15 +67,12 @@ def build_header_lookup(groups: Dict[str, List[str]]) -> Dict[str, str]:
 
 
 def resolve_header_cell(value, lookup: Dict[str, str]) -> Optional[str]:
-    name = lookup.get(normalize_text(value))
-    if name in HEADER_GROUPS:
-        return name
-    return None
+    return lookup.get(normalize_text(value))
 
 
 def build_column_map_from_header_row(
     header_row: List, lookup: Dict[str, str]
-) -> Dict[int, str]:
+     ) -> Dict[int, str]:
     col_map: Dict[int, str] = {}
     for col_idx, cell in enumerate(header_row, start=1):
         resolved = resolve_header_cell(cell, lookup)
@@ -244,6 +171,10 @@ def build_output_row(row: List, col_map: Dict[int, str]) -> Optional[Tuple]:
     vi = col_idx(col_map, "Veh Reg No.")
     li = col_idx(col_map, "Lane No")
 
+    vrn = veh_as_text(cell_at(row, vi))
+    if not vrn:
+        return None
+
     raw_date = cell_at(row, di)
     if isinstance(raw_date, datetime):
         dt_out: object = raw_date
@@ -252,7 +183,6 @@ def build_output_row(row: List, col_map: Dict[int, str]) -> Optional[Tuple]:
         if dt_out is None:
             dt_out = raw_date
 
-    vrn = veh_as_text(cell_at(row, vi))
     lane = lane_as_text(cell_at(row, li))
 
     return (dt_out, vrn, "ETC", lane)
@@ -525,7 +455,7 @@ def _delete_with_retries(path: Path, retries: int = 5, delay_seconds: float = 0.
 def _normalized_csv_row_from_source(
     row: List,
     col_map: Dict[int, str],
-) -> Optional[List[object]]:
+     ) -> Optional[List[object]]:
     out = build_output_row(row, col_map)
     if out is None:
         return None
@@ -546,7 +476,7 @@ def _append_normalized_xlsx_rows(
     lookup: Dict[str, str],
     col_map: Dict[int, str],
     sheet_label: str = "",
-) -> int:
+     ) -> int:
     rows_written = 0
     tail_empty = 0
     scan_last = min(first_row_inclusive + XLSX_STREAM_MAX_ROWS - 1, 1_048_576)
@@ -599,7 +529,7 @@ def convert_xlsx_to_csv_with_normalization(
     keywords: Sequence[str],
     lookup: Dict[str, str],
     min_keyword_matches: Optional[int] = None,
-) -> int:
+     ) -> int:
     from csv_converter import HEADER_SCAN_MAX_ROW, detect_header_row_on_worksheet
 
     path = path.resolve()
@@ -711,7 +641,7 @@ def convert_xls_to_csv_with_normalization(
     keywords: Sequence[str],
     lookup: Dict[str, str],
     min_keyword_matches: Optional[int] = None,
-) -> int:
+      ) -> int:
     from csv_converter import detect_header_xls
 
     header_row, header_cols = detect_header_xls(path, keywords, min_keyword_matches)
@@ -795,7 +725,7 @@ def convert_workbook_to_normalized_csv(
     keywords: Sequence[str],
     lookup: Dict[str, str],
     min_keyword_matches: Optional[int] = None,
-) -> int:
+    ) -> int:
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
         return convert_xlsx_to_csv_with_normalization(
@@ -819,7 +749,7 @@ def convert_workbook_to_normalized_csv(
 def phase_convert_workbooks_to_csv_and_delete(
     folder_path: Path,
     lookup: Dict[str, str],
-) -> Set[Path]:
+    ) -> Set[Path]:
     converted_csvs: Set[Path] = set()
 
     try:
@@ -917,11 +847,13 @@ def merge_normalized_files():
 
 def main():
     start = time.perf_counter()
-    lookup = build_header_lookup(HEADER_GROUPS)
+    groups = get_normalization_groups()
+    lookup = build_header_lookup(groups)
     INPUT_FOLDER.mkdir(parents=True, exist_ok=True)
     MERGE_OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     print(f"Input folder: {INPUT_FOLDER}", flush=True)
     print(f"Merge output: {MERGE_OUTPUT_FILE}", flush=True)
+    print(f"Loaded {len(groups)} LC header group(s) from config.", flush=True)
 
     converted_csvs = phase_convert_workbooks_to_csv_and_delete(INPUT_FOLDER, lookup)
 

@@ -227,14 +227,20 @@ def resolve_header_name(value, normalization_lookup):
 
 def should_drop_row(row_values, header_columns):
     lane_col_idx = next((idx for idx, name in header_columns.items() if name == "Lane No"), None)
-    if lane_col_idx is None or lane_col_idx > len(row_values):
-        return False
+    if lane_col_idx is not None and lane_col_idx <= len(row_values):
+        lane_value = row_values[lane_col_idx - 1]
+        if lane_value is None or str(lane_value).strip() == "":
+            return True
+        if str(lane_value).strip().upper() == "EXEMPTED":
+            return True
 
-    lane_value = row_values[lane_col_idx - 1]
-    if lane_value is None or str(lane_value).strip() == "":
-        return True
-    if str(lane_value).strip().upper() == "EXEMPTED":
-        return True
+    # Keep only rows with a non-empty vehicle registration number (no format validation).
+    vrn_col_idx = next((idx for idx, name in header_columns.items() if name == "Veh Reg No."), None)
+    if vrn_col_idx is not None and vrn_col_idx <= len(row_values):
+        vrn_value = row_values[vrn_col_idx - 1]
+        if vrn_value is None or str(vrn_value).strip() == "":
+            return True
+
     return False
 
 
@@ -698,7 +704,7 @@ def _detect_xls_header(
     path: Path,
     keywords: Sequence[str],
     min_keyword_matches: Optional[int] = None,
-) -> Tuple[int, int]:
+     ) -> Tuple[int, int]:
     from csv_converter import detect_header_xls
 
     return detect_header_xls(path, keywords, min_keyword_matches)
@@ -710,7 +716,7 @@ def convert_xlsx_to_csv_with_normalization(
     keywords: Sequence[str],
     normalization_lookup,
     min_keyword_matches: Optional[int] = None,
-) -> Tuple[int, int]:
+    ) -> Tuple[int, int]:
     from csv_converter import HEADER_SCAN_MAX_ROW, detect_header_row_on_worksheet
 
     path = path.resolve()
