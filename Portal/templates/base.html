@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}NHIT In House File Processing{% endblock %}</title>
+    <title>{% block title %}NHIT File Processing Portal{% endblock %}</title>
     <link
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
         rel="stylesheet"
@@ -302,6 +302,16 @@
             outline: none;
             border-color: rgba(46, 168, 106, 0.55);
             box-shadow: 0 0 0 4px rgba(46, 168, 106, 0.16);
+        }
+        .field[readonly] {
+            background: #10151c;
+            color: #9aa7b5;
+            cursor: not-allowed;
+        }
+        select.field:disabled {
+            background: #10151c;
+            color: #9aa7b5;
+            cursor: not-allowed;
         }
         .file-input {
             display: flex;

@@ -1,0 +1,22 @@
+{#
+  Requires:
+    current_process_name
+    process_name_locked (bool) — true when the process already has attached files
+#}
+<div class="stack">
+    <label for="process_name_input" class="muted">Process Name</label>
+    <input
+        id="process_name_input"
+        class="field"
+        type="text"
+        name="process_name"
+        placeholder="Enter process name"
+        value="{{ current_process_name }}"
+        required
+        {% if process_name_locked %}readonly{% endif %}
+        {% if process_name_locked %}title="Process name is locked while files are attached"{% endif %}
+    >
+    {% if process_name_locked %}
+        <p class="muted">Process name is locked while files are attached. Delete all files to rename.</p>
+    {% endif %}
+</div>

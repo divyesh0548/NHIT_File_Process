@@ -118,18 +118,8 @@
                     </div>
                 </div>
                 <div class="stack">
-                    <div class="stack">
-                        <label for="process_name_input" class="muted">Process Name</label>
-                        <input
-                            id="process_name_input"
-                            class="field"
-                            type="text"
-                            name="process_name"
-                            placeholder="Enter process name"
-                            value="{{ current_process_name }}"
-                            required
-                        >
-                    </div>
+                    {% set process_name_locked = (merged_life_cycle_files | length) > 0 or (rates_files | length) > 0 %}
+                    {% include "partials/process_name_field.html" %}
                     <div class="stack">
                         <span class="muted">Merged Life Cycle source</span>
                         <div class="stack" style="gap: 8px;">

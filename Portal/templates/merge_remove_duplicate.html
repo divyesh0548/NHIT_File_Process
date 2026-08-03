@@ -39,16 +39,8 @@
                 </div>
                 <div class="stack">
                     <div class="stack">
-                        <label for="process_name_input" class="muted">Process Name</label>
-                        <input
-                            id="process_name_input"
-                            class="field"
-                            type="text"
-                            name="process_name"
-                            placeholder="Enter process name"
-                            value="{{ current_process_name }}"
-                            required
-                        >
+                        {% set process_name_locked = (vrn_files | length) > 0 or (lc_files | length) > 0 %}
+                        {% include "partials/process_name_field.html" %}
                     </div>
 
                     <div class="card" style="padding: 16px;">

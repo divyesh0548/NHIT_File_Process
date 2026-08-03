@@ -117,25 +117,9 @@
 
                 <div class="stack">
 
-                    <label for="process_name_input" class="muted">Process Name</label>
+                    {% set process_name_locked = (uploaded_files | length) > 0 %}
 
-                    <input
-
-                        id="process_name_input"
-
-                        class="field"
-
-                        type="text"
-
-                        name="process_name"
-
-                        placeholder="Enter process name"
-
-                        value="{{ current_process_name }}"
-
-                        required
-
-                    >
+                    {% include "partials/process_name_field.html" %}
 
                 </div>
 
@@ -143,7 +127,7 @@
 
                     <label for="file_kind_select" class="muted">File Type</label>
 
-                    <select id="file_kind_select" class="field" name="file_kind" required>
+                    <select id="file_kind_select" class="field" name="file_kind" required {% if (uploaded_files | length) > 0 %}disabled{% endif %}>
 
                         <option value="" {% if not current_file_kind %}selected{% endif %}>Select VRN or LC/ETC</option>
 
@@ -154,6 +138,11 @@
                         {% endfor %}
 
                     </select>
+
+                    {% if (uploaded_files | length) > 0 %}
+                        <input type="hidden" name="file_kind" value="{{ current_file_kind }}">
+                        <p class="muted">File type is locked while files are attached. Delete all files to change it.</p>
+                    {% endif %}
 
                 </div>
 

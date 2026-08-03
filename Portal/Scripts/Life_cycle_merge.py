@@ -16,19 +16,26 @@ from header_matching import normalize_header_match
 
 HEADER_SCAN_ROWS = 50
 FINAL_MERGE_CHUNK_ROWS = 100_000
+MIN_HEADER_MATCHES = 3
+
+
+class HeaderNotDetectedError(ValueError):
+    """Raised when a file/sheet does not contain enough configured header keywords."""
 
 
 def _normalize_col_name(col):
     return normalize_header_match(col)
 
 
-def _detect_header_row_index(df_raw, header_keywords, min_matches=3):
+def _detect_header_row_index(df_raw, header_keywords, min_matches=MIN_HEADER_MATCHES):
     """
-    Detect the header row by scanning only a small sample from the top of the sheet.
-    Returns 0 when no confident match is found.
+    Detect the header row by scanning a sample from the top of the sheet.
+
+    Returns the row index when at least min_matches keywords are found.
+    Returns None when no confident match is found (does not fall back to row 0).
     """
     target = {normalize_header_match(k) for k in header_keywords if normalize_header_match(k)}
-    best_idx = 0
+    best_idx = None
     best_matches = 0
 
     for idx in range(len(df_raw)):
@@ -44,7 +51,9 @@ def _detect_header_row_index(df_raw, header_keywords, min_matches=3):
         if match_count >= min_matches:
             return idx
 
-    return best_idx if best_matches >= min_matches else 0
+    if best_idx is not None and best_matches >= min_matches:
+        return best_idx
+    return None
 
 
 def _read_csv_fast(file_path):
@@ -54,10 +63,10 @@ def _read_csv_fast(file_path):
         return pd.read_csv(file_path, low_memory=False)
 
 
-def find_header_csv(df, header_keywords, file_name):
+def find_header_csv(df, header_keywords, file_name, scan_rows=HEADER_SCAN_ROWS, file_path=None):
     """
-    Finds the header row in a CSV DataFrame based on the presence of given header keywords.
-    At least 3 keywords must be detected in the columns (matched with normalized column names).
+    Finds the header row in a CSV based on configured header keywords.
+    Requires at least MIN_HEADER_MATCHES matches; otherwise raises HeaderNotDetectedError.
     """
     norm_to_original = {_normalize_col_name(c): c for c in df.columns}
     matched_keywords = []
@@ -66,18 +75,63 @@ def find_header_csv(df, header_keywords, file_name):
         if nk in norm_to_original:
             matched_keywords.append(norm_to_original[nk])
 
-    if len(matched_keywords) >= 3:
+    if len(matched_keywords) >= MIN_HEADER_MATCHES:
         start_idx = df.columns.get_loc(matched_keywords[0])
-        print(f"Header detected in {file_name} at column index {start_idx} with keywords {matched_keywords}")
-        df = df.iloc[:, start_idx:]
+        print(
+            f"Header detected in {file_name} at column index {start_idx} "
+            f"with keywords {matched_keywords}"
+        )
+        return df.iloc[:, start_idx:]
 
-    return df
+    # Row 0 columns did not match — scan first N rows for a header row.
+    if file_path is None:
+        raise HeaderNotDetectedError(
+            f"No header detected in {Path(file_name).name}. "
+            f"Need at least {MIN_HEADER_MATCHES} header keywords. Check the header keywords."
+        )
+
+    try:
+        df_sample = pd.read_csv(
+            file_path, header=None, dtype=str, nrows=scan_rows, low_memory=False
+        )
+    except Exception:
+        df_sample = pd.read_csv(
+            file_path,
+            header=None,
+            dtype=str,
+            nrows=scan_rows,
+            low_memory=False,
+            encoding="cp1252",
+        )
+
+    if df_sample.empty:
+        raise HeaderNotDetectedError(
+            f"No header detected in {Path(file_name).name}. "
+            f"Need at least {MIN_HEADER_MATCHES} header keywords. Check the header keywords."
+        )
+
+    header_idx = _detect_header_row_index(df_sample, header_keywords)
+    if header_idx is None:
+        raise HeaderNotDetectedError(
+            f"No header detected in {Path(file_name).name}. "
+            f"Need at least {MIN_HEADER_MATCHES} header keywords. Check the header keywords."
+        )
+
+    print(f"Header detected in {file_name} at row index {header_idx}")
+    try:
+        return pd.read_csv(file_path, skiprows=header_idx, header=0, engine="pyarrow")
+    except Exception:
+        return pd.read_csv(file_path, skiprows=header_idx, header=0, low_memory=False)
 
 
 def find_header_excel(excel_data, sheet_name, header_keywords, file_name, scan_rows=HEADER_SCAN_ROWS):
     """
     Detect the header row using only the first few rows, then read the sheet once fully.
-    This avoids a full-sheet read just for header detection.
+
+    Returns:
+      - DataFrame when header is detected
+      - None when the sheet is empty
+    Raises HeaderNotDetectedError when the sheet has data but < MIN_HEADER_MATCHES keywords.
     """
     df_sample = pd.read_excel(
         excel_data,
@@ -87,11 +141,16 @@ def find_header_excel(excel_data, sheet_name, header_keywords, file_name, scan_r
         nrows=scan_rows,
     )
     if df_sample.empty:
-        return pd.DataFrame()
+        return None
 
     header_idx = _detect_header_row_index(df_sample, header_keywords)
-    print(f"Header detected in {file_name} [{sheet_name}] at row index {header_idx}")
+    if header_idx is None:
+        raise HeaderNotDetectedError(
+            f"No header detected in {Path(file_name).name} [{sheet_name}]. "
+            f"Need at least {MIN_HEADER_MATCHES} header keywords. Check the header keywords."
+        )
 
+    print(f"Header detected in {file_name} [{sheet_name}] at row index {header_idx}")
     return pd.read_excel(excel_data, sheet_name=sheet_name, skiprows=header_idx, header=0)
 
 
@@ -99,18 +158,31 @@ def _load_dataframe_for_file(file, header_keywords):
     """Load one file once, including all Excel sheets when present."""
     if file.lower().endswith(".csv"):
         df = _read_csv_fast(file)
-        return find_header_csv(df, header_keywords, file)
+        return find_header_csv(df, header_keywords, file, file_path=file)
 
     if file.lower().endswith((".xls", ".xlsx")):
         excel_data = pd.ExcelFile(file)
         merged_data = []
+        sheet_errors = []
         for sheet_name in excel_data.sheet_names:
-            sheet_data = find_header_excel(excel_data, sheet_name, header_keywords, file)
-            if not sheet_data.empty:
+            try:
+                sheet_data = find_header_excel(excel_data, sheet_name, header_keywords, file)
+            except HeaderNotDetectedError as exc:
+                sheet_errors.append(str(exc))
+                print(f"Header not detected — skipping sheet: {exc}")
+                continue
+            if sheet_data is not None and not sheet_data.empty:
                 merged_data.append(sheet_data)
-        if not merged_data:
-            return pd.DataFrame()
-        return pd.concat(merged_data, ignore_index=True)
+
+        if merged_data:
+            return pd.concat(merged_data, ignore_index=True)
+
+        # No usable sheet: block merge with a clear message.
+        detail = sheet_errors[0] if sheet_errors else (
+            f"No header detected in {Path(file).name}. "
+            f"Need at least {MIN_HEADER_MATCHES} header keywords. Check the header keywords."
+        )
+        raise HeaderNotDetectedError(detail)
 
     return None
 
@@ -203,6 +275,9 @@ def merge_files_in_folder(folder_path, output_file, header_keywords):
     """
     Merge all valid files in the folder into one CSV.
     Expensive parsing is done once per source file, then final alignment happens from staged CSVs.
+
+    Raises HeaderNotDetectedError when any input file has no sheet/row with enough
+    header keywords — merge is blocked in that case.
     """
     merge_start = perf_counter()
 
@@ -221,13 +296,31 @@ def merge_files_in_folder(folder_path, output_file, header_keywords):
 
     temp_dir = tempfile.mkdtemp(prefix="life_cycle_merge_", dir=folder_path)
     try:
+        # Process sequentially first for clearer header errors; use pool only after
+        # validating would lose exception clarity with multiprocessing wrappers.
+        # Keep parallel processing but unwrap HeaderNotDetectedError for the portal.
         worker_count = max(1, cpu_count())
         with Pool(processes=worker_count) as pool:
-            staged_results = pool.starmap(
-                process_file_to_temp,
-                [(file, header_keywords, temp_dir) for file in files_to_process],
-                chunksize=1,
-            )
+            async_results = [
+                pool.apply_async(process_file_to_temp, (file, header_keywords, temp_dir))
+                for file in files_to_process
+            ]
+            staged_results = []
+            for file, async_result in zip(files_to_process, async_results):
+                try:
+                    staged_results.append(async_result.get())
+                except HeaderNotDetectedError:
+                    raise
+                except Exception as exc:
+                    # multiprocessing may wrap remote exceptions
+                    message = str(exc)
+                    if "No header detected" in message or "HeaderNotDetectedError" in message:
+                        raise HeaderNotDetectedError(
+                            f"No header detected in {Path(file).name}. "
+                            f"Need at least {MIN_HEADER_MATCHES} header keywords. "
+                            "Check the header keywords."
+                        ) from exc
+                    raise
 
         staged_files = [
             staged_result
@@ -235,8 +328,10 @@ def merge_files_in_folder(folder_path, output_file, header_keywords):
             if staged_result is not None and os.path.exists(staged_result["temp_path"])
         ]
         if not staged_files:
-            print("No processable data found in input files.")
-            return
+            raise HeaderNotDetectedError(
+                f"No header detected in the uploaded files. "
+                f"Need at least {MIN_HEADER_MATCHES} header keywords. Check the header keywords."
+            )
 
         canonical_order, norm_to_canonical = _build_canonical_columns(staged_files)
         print(f"Union column count: {len(canonical_order)}")

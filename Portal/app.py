@@ -25,7 +25,11 @@ from Header_Mapping.header_mapping import (
     VALID_INVALID_LOOKUP_REQUIRED_COLUMNS,
 )
 from header_matching import normalize_header_match
-from Scripts.Life_cycle_merge import _detect_header_row_index, merge_files_in_folder
+from Scripts.Life_cycle_merge import (
+    HeaderNotDetectedError,
+    _detect_header_row_index,
+    merge_files_in_folder,
+)
 
 _VIL_CONFIG_DIR = Path(__file__).resolve().parent / "Scripts" / "valid_invalid_lookup"
 if str(_VIL_CONFIG_DIR) not in sys.path:
@@ -929,6 +933,8 @@ def inspect_valid_invalid_headers(file_path):
     if file_path.suffix.lower() == ".csv":
         sample = pd.read_csv(file_path, header=None, dtype=str, nrows=VALID_INVALID_HEADER_SCAN_ROWS)
         header_row_index = _detect_header_row_index(sample, header_candidates, min_matches=2)
+        if header_row_index is None:
+            header_row_index = 0
         dataframe = pd.read_csv(file_path, skiprows=header_row_index, nrows=0)
         source_name = file_path.name
     else:
@@ -946,7 +952,10 @@ def inspect_valid_invalid_headers(file_path):
             )
             if sample.empty:
                 continue
-            header_row_index = _detect_header_row_index(sample, header_candidates, min_matches=2)
+            detected_idx = _detect_header_row_index(sample, header_candidates, min_matches=2)
+            if detected_idx is None:
+                continue
+            header_row_index = detected_idx
             dataframe = pd.read_excel(excel_file, sheet_name=sheet_name, skiprows=header_row_index, nrows=0)
             source_name = f"{file_path.name} [{sheet_name}]"
             if len(dataframe.columns) > 0:
@@ -1470,7 +1479,12 @@ def process_life_cycle_files(process_name):
             str(output_file.resolve()),
             header_keywords,
         )
+    except HeaderNotDetectedError as exc:
+        return False, str(exc)
     except Exception as exc:
+        message = str(exc)
+        if "No header detected" in message:
+            return False, message
         return False, f"Life cycle merge failed: {exc}"
 
     if not output_file.exists():
