@@ -8,7 +8,7 @@ Convert .xlsx / .xls to .csv with header detection and row trimming.
   first sheet), then that sheet's data rows, then each following sheet's data
   only (its header row skipped). Output column width is the max width found across
   sheets. Cells are matched to HEADER_KEYWORDS using norm_key (strip, casefold,
-  all whitespace removed).
+  whitespace and symbols removed; letters/digits only).
 - All rows above each sheet's chosen header are omitted for that sheet.
 - Every output row is truncated (or padded) to the header row's column count;
   any values beyond that width are dropped.
@@ -48,7 +48,8 @@ INPUT_FOLDER = Path(__file__).resolve().parent / "vrn"
 
 CONVERT_EXTENSIONS = {".xlsx", ".xls"}
 
-# Header keywords: each string is normalized like cells (strip, casefold, no whitespace).
+# Header keywords: each string is normalized like cells (strip, casefold,
+# no whitespace/symbols — letters and digits only).
 # A row qualifies only if it matches at least MIN_HEADER_KEYWORD_MATCHES keywords.
 HEADER_KEYWORDS: List[str] = [
     "VEH REG NO",

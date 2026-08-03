@@ -1,0 +1,32 @@
+{# Expects config_review_items: list of config display names shown on this process form. #}
+{% if config_review_items %}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;" aria-live="polite">
+    {% for config_name in config_review_items %}
+    <div
+        class="toast config-review-toast"
+        role="status"
+        aria-atomic="true"
+        data-bs-autohide="true"
+        data-bs-delay="9000"
+    >
+        <div class="d-flex align-items-center">
+            <div class="toast-body">Review {{ config_name }} before processing.</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        if (typeof bootstrap === "undefined") {
+            return;
+        }
+        document.querySelectorAll(".config-review-toast").forEach(function (toastEl, index) {
+            var toast = new bootstrap.Toast(toastEl);
+            window.setTimeout(function () {
+                toast.show();
+            }, index * 350);
+        });
+    });
+</script>
+{% endif %}

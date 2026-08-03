@@ -30,6 +30,9 @@
     </div>
 {% endif %}
 
+{% set config_review_items = ["Pass Config"] %}
+{% include "partials/config_review_notice.html" %}
+
 <section class="workflow-layout">
     <div class="workflow-main">
         <form id="final-exempt-form" method="post" enctype="multipart/form-data" class="stack">
@@ -107,7 +110,7 @@
                         <p class="muted">Start becomes available after a plaza, one semi-final CSV, and at least one pass file are attached.</p>
                     {% endif %}
                     <div class="actions">
-                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Start {{ final_exempt_group_label }}</button>
+                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Start Final Exempt Process</button>
                     </div>
                 </div>
             </article>

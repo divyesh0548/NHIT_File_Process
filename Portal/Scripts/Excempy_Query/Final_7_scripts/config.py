@@ -1,7 +1,14 @@
 import os
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+_PORTAL_ROOT = Path(__file__).resolve().parents[3]
+if str(_PORTAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PORTAL_ROOT))
+
+from header_matching import normalize_header_match
 
 
 def _env_path(name, default):
@@ -112,22 +119,12 @@ LT_PASS_TYPE_VALUES = _PASS_CFG["LT_PASS_TYPE_VALUES"]
 
 
 def _normalize_pass_col_name(col) -> str:
-    s = str(col).strip().lower()
-    return "".join(s.split())
+    return normalize_header_match(col)
 
 
 def normalize_pass_type_value(value) -> str:
-    """Normalize a Pass Type cell for alias matching (strip, casefold, no spaces)."""
-    if value is None:
-        return ""
-    try:
-        import pandas as pd
-
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-    return "".join(str(value).strip().casefold().split())
+    """Normalize a Pass Type cell for alias matching (same rules as header matching)."""
+    return normalize_header_match(value)
 
 
 def mp_pass_type_normalized_set():

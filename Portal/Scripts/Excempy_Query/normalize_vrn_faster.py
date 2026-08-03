@@ -22,6 +22,7 @@ from win32com.client import DispatchEx
 
 from merge_files import merge_files_in_folder
 from vrn_normalization_config import get_normalization_groups
+from header_matching import normalize_header_match
 
 BASE_DIR = Path(__file__).resolve().parent
 PORTAL_ROOT = BASE_DIR.parents[1]
@@ -58,12 +59,8 @@ NORMALIZATION_GROUPS = get_normalization_groups()
 
 
 def normalize_text(value):
-    if value is None:
-        return ""
-    text = str(value).strip().casefold()
-    for char in ("_", "-", "/", "\\", ".", ",", "(", ")", "[", "]"):
-        text = text.replace(char, " ")
-    return " ".join(text.split())
+    """Normalize header/alias text the same way as site-wide header keyword matching."""
+    return normalize_header_match(value)
 
 
 def build_lookup(groups):

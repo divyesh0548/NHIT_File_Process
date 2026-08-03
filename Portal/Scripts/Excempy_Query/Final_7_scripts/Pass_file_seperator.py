@@ -26,6 +26,12 @@ from config import (
 )
 from pass_config import load_config_values as _load_pass_config
 
+_PORTAL_ROOT = Path(__file__).resolve().parents[3]
+if str(_PORTAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PORTAL_ROOT))
+
+from header_matching import normalize_header_match
+
 SUPPORTED_EXTENSIONS = {".xls", ".xlsx", ".csv"}
 SUMMARY_FILENAME = "pass_separator_summary.json"
 
@@ -37,7 +43,7 @@ def _load_runtime_config():
 
 
 def _normalise(value) -> str:
-    return "".join(str(value).strip().casefold().split())
+    return normalize_header_match(value)
 
 
 def _find_header_row(

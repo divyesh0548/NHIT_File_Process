@@ -23,6 +23,7 @@ from win32com.client import DispatchEx
 
 from merge_files import merge_files_in_folder
 from lc_normalization_config import get_normalization_groups
+from header_matching import normalize_header_match
 
 BASE_DIR = Path(__file__).resolve().parent
 _DEFAULT_INPUT_FOLDER = BASE_DIR / "Daroda_lc_vrn_files/etc"
@@ -49,12 +50,8 @@ XLSX_STREAM_TAIL_EMPTY_ROWS = 200
 
 
 def normalize_text(value) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip().casefold()
-    for char in ("_", "-", "/", "\\", ".", ",", "(", ")", "[", "]"):
-        text = text.replace(char, " ")
-    return " ".join(text.split())
+    """Normalize header/alias text the same way as site-wide header keyword matching."""
+    return normalize_header_match(value)
 
 
 def build_header_lookup(groups: Dict[str, List[str]]) -> Dict[str, str]:

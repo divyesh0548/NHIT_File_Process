@@ -1,8 +1,9 @@
 """
 Shared normalization for header keyword / column matching.
 
-Rules: strip, casefold, remove all whitespace (including between words).
-DB keywords and file header cells are compared using this form.
+Rules applied to both DB keywords and file header cells before compare:
+strip, casefold (lowercase), remove whitespace, remove symbols.
+Only letters and digits remain.
 """
 
 
@@ -17,4 +18,4 @@ def normalize_header_match(value) -> str:
     except Exception:
         pass
     s = str(value).strip().casefold()
-    return "".join(ch for ch in s if not ch.isspace())
+    return "".join(ch for ch in s if ch.isalnum())

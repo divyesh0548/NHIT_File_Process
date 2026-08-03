@@ -34,6 +34,9 @@
     </div>
 {% endif %}
 
+{% set config_review_items = ["Process Config"] %}
+{% include "partials/config_review_notice.html" %}
+
 {% if header_info %}
     <article class="card" style="margin-bottom: 22px;">
         <div class="section-head">
@@ -113,7 +116,7 @@
             <article class="card">
                 <div class="section-head">
                     <div>
-                        <h2>{{ valid_invalid_subprocess_label }} Form</h2>
+                        <h2>Process Form</h2>
                         <p>Process name, upload, and submit are grouped for this workflow.</p>
                     </div>
                 </div>
