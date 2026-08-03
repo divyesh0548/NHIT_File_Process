@@ -79,6 +79,12 @@ _DEFAULT_VALUES: Dict[str, Any] = {
     "RATE_SHEET_JOURNEY_COLUMN_RENAMES": {
         "Return Journey": "Cont. Journey",
         "Local Conti/Local Single": "Local Conti/Single",
+        # Sheet column aliases → canonical Attribute used after melt / rate lookup.
+        "Single": "Single Journey",
+        "SINGLE": "Single Journey",
+        "SingleJourney": "Single Journey",
+        "Single journey": "Single Journey",
+        "SINGLE JOURNEY": "Single Journey",
     },
     # Aliases for the three fixed identity columns on the rates sheet.
     # Canonical keys cannot be removed; users add alternate header spellings under each.
@@ -275,7 +281,8 @@ CONFIG_SCHEMA: Dict[str, Dict[str, Any]] = {
         "description": (
             "Map any rates-sheet journey column name → canonical Attribute: "
             '"Single Journey", "Cont. Journey", or "Local Conti/Single". '
-            "Add a row when a plaza uses a different header (e.g. "
+            "Add a row when a plaza uses a different header "
+            '(e.g. "Single" → "Single Journey", '
             '"Local Conti/Local Single" → "Local Conti/Single").'
         ),
         "order": 6,

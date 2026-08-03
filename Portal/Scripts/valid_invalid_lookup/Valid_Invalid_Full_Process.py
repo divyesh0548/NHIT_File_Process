@@ -469,7 +469,7 @@ def main():
     df_bus = get_rate(df_bus, rates_df, is_bus=True)
     df_combined = pd.concat([df_final_1, df_bus], ignore_index=True).drop(columns=["Rate 1", "value"], errors="ignore")
 
-    single_rates = rates_df[rates_df["Attribute"] == "Single Journey"]
+    single_rates = rates_df[rates_df["Attribute"] == UPDATED_JOURNEY_TYPE_SINGLE]
     rate_lookup = dict(zip(single_rates["TC Class"], single_rates["value"]))
 
     df_invalid = df_combined[df_combined["Custom.4"] == "Invalid"]
