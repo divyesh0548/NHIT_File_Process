@@ -14,14 +14,14 @@
 <section class="grid cols-2" style="margin-bottom: 20px;">
     <article class="card">
         <h3 class="card-title">{{ merge_valid_lookup_group_label }}</h3>
-        <p>Life Cycle Merge and Valid/Invalid Lookup are sub-processes in this group. Upload files, run merges, and produce lookup outputs.</p>
+        <p> Merge lifecycle files and generate valid invalid lookup files.</p>
         <div class="actions">
             <a class="btn" href="{{ url_for('merge_valid_lookup_hub') }}">Open</a>
         </div>
     </article>
     <article class="card">
         <h3 class="card-title">Exempt Query</h3>
-        <p>Separate workflow for exempt exception detection, RF3 rules, pass validity checks, and return journey logic.</p>
+        <p> Normalize + Merge files and run final exempt query.</p>
         <div class="actions">
             <a class="btn" href="{{ url_for('exempt_query_hub') }}">Open</a>
         </div>

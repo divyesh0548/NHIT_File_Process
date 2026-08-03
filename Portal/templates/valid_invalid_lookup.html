@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Valid/Invalid Lookup{% endblock %}
+{% block title %}{{ valid_invalid_subprocess_label }}{% endblock %}
 
 {% block content %}
 <section class="page-header">
     <div>
         <p class="eyebrow">Process Intake</p>
-        <h1>Valid/Invalid Lookup</h1>
+        <h1>{{ valid_invalid_subprocess_label }}</h1>
         <p>Upload source files and submit this process.</p>
     </div>
     <div class="actions" style="margin-top: 0;">
@@ -113,7 +113,7 @@
             <article class="card">
                 <div class="section-head">
                     <div>
-                        <h2>Valid/Invalid Lookup Form</h2>
+                        <h2>{{ valid_invalid_subprocess_label }} Form</h2>
                         <p>Process name, upload, and submit are grouped for this workflow.</p>
                     </div>
                 </div>
@@ -147,7 +147,7 @@
                                 {% endfor %}
                             </select>
                             {% if not lcm_output_files %}
-                                <p class="muted">No files found under <code>Life_Cycle_Merge/*/output/</code>. Run a merge first.</p>
+                                <p class="muted">No files found under <code>{{ life_cycle_subprocess_folder }}/*/output/</code>. Run a merge first.</p>
                             {% endif %}
                             {% if pending_lcm_import_rel %}
                                 <p class="muted">A merge output file is selected. Review the mapping above and click <strong>Confirm</strong> to attach it to this process.</p>

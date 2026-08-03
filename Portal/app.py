@@ -93,11 +93,16 @@ LEGACY_VALID_INVALID_PARENT_FOLDER = "Merge_Valid_Lookup"
 EXEMPT_QUERY_PARENT_FOLDER = "Exempt_Query"
 
 # Sub-processes under Valid_Invalid_Process/
-LIFE_CYCLE_SUBPROCESS_FOLDER = "Life_Cycle_Merge"
-VALID_INVALID_SUBPROCESS_FOLDER = "Valid_Invalid_Lookup"
+LIFE_CYCLE_SUBPROCESS_FOLDER = "1_Life_Cycle_Merge"
+VALID_INVALID_SUBPROCESS_FOLDER = "2_Valid_Invalid_Lookup"
+LIFE_CYCLE_SUBPROCESS_LABEL = "1. Life Cycle Merge"
+VALID_INVALID_SUBPROCESS_LABEL = "2. Valid/Invalid Lookup"
+# Legacy folder names (pre-index) — migrated on startup when present.
+LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER = "Life_Cycle_Merge"
+LEGACY_VALID_INVALID_SUBPROCESS_FOLDER = "Valid_Invalid_Lookup"
 
 # Sub-processes under Exempt_Query/
-MERGE_NORMALIZE_SUBPROCESS_FOLDER = "Merge_&_Normalize"
+MERGE_NORMALIZE_SUBPROCESS_FOLDER = "1_Merge_&_Normalize"
 MERGE_NORMALIZE_LC_ETC_FOLDER = "LC_ETC"
 MERGE_NORMALIZE_VRN_FOLDER = "VRN"
 MERGE_NORMALIZE_FILE_KINDS = (MERGE_NORMALIZE_LC_ETC_FOLDER, MERGE_NORMALIZE_VRN_FOLDER)
@@ -106,22 +111,25 @@ MERGE_NORMALIZE_FILE_KIND_LABELS = {
     MERGE_NORMALIZE_VRN_FOLDER: "VRN",
 }
 HEADER_KEYWORDS_LC_ETC_VRN_LABEL = "LC/ETC/VRN"
-MERGE_NORMALIZE_GROUP_LABEL = "Merge + Normalize"
+MERGE_NORMALIZE_GROUP_LABEL = "1. Merge + Normalize"
 MERGE_NORMALIZE_OUTPUT_FILENAME = "normalized_and_merged.csv"
+LEGACY_MERGE_NORMALIZE_SUBPROCESS_FOLDER = "Merge_&_Normalize"
 
-MERGE_REMOVE_DUP_SUBPROCESS_FOLDER = "Merge_&_Remove_Duplicate"
-MERGE_REMOVE_DUP_GROUP_LABEL = "Merge + Remove Duplicate"
+MERGE_REMOVE_DUP_SUBPROCESS_FOLDER = "2_Merge_&_Remove_Duplicate"
+MERGE_REMOVE_DUP_GROUP_LABEL = "2. Merge + Remove Duplicate"
 MERGE_REMOVE_DUP_VRN_SLOT = "vrn"
 MERGE_REMOVE_DUP_LC_SLOT = "lc_etc"
 SEMI_FINAL_OUTPUT_FILENAME = "semi-final-output.csv"
 MERGE_REMOVE_DUP_ALLOWED_EXTENSIONS = {".csv"}
+LEGACY_MERGE_REMOVE_DUP_SUBPROCESS_FOLDER = "Merge_&_Remove_Duplicate"
 
-FINAL_EXEMPT_SUBPROCESS_FOLDER = "Final_Exempt_Process"
-FINAL_EXEMPT_GROUP_LABEL = "Final Exempt Process"
+FINAL_EXEMPT_SUBPROCESS_FOLDER = "3_Final_Exempt_Process"
+FINAL_EXEMPT_GROUP_LABEL = "3. Final Exempt Process"
 FINAL_EXEMPT_SEMI_SLOT = "semi"
 FINAL_EXEMPT_PASS_SLOT = "pass"
 FINAL_EXEMPT_INTERMEDIATE_FOLDER = "Intermediate_Files"
 FINAL_EXEMPT_CONFIG_FILENAME = "final_exempt_config.json"
+LEGACY_FINAL_EXEMPT_SUBPROCESS_FOLDER = "Final_Exempt_Process"
 FINAL_EXEMPT_REQUIRED_SEMI_COLUMNS = {
     "Veh Reg No.",
     "Date & Time",
@@ -154,6 +162,68 @@ PROCESS_STARTED_STATUS_HINT = "Go to Process Management to view status."
 FILE_PROCESS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _migrate_subdir_rename(parent: Path, old_name: str, new_name: str) -> None:
+    """Rename parent/old_name → parent/new_name when only the legacy folder exists."""
+    if not parent.is_dir() or not old_name or old_name == new_name:
+        return
+    old_path = parent / old_name
+    new_path = parent / new_name
+    if old_path.is_dir() and not new_path.exists():
+        try:
+            old_path.rename(new_path)
+        except OSError:
+            pass
+
+
+def ensure_file_process_default_dirs():
+    """
+    Create the default File_Process tree on portal startup.
+
+    Portal/File_Process/ is gitignored (runtime uploads/outputs only). A fresh
+    clone therefore has no folder until the app starts — this fills the skeleton.
+    """
+    FILE_PROCESS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Valid/Invalid Process (+ legacy parent / subprocess renames)
+    migrate_valid_invalid_parent_folder()
+
+    exempt_dir = FILE_PROCESS_DIR / EXEMPT_QUERY_PARENT_FOLDER
+    exempt_dir.mkdir(parents=True, exist_ok=True)
+    _migrate_subdir_rename(
+        exempt_dir, LEGACY_MERGE_NORMALIZE_SUBPROCESS_FOLDER, MERGE_NORMALIZE_SUBPROCESS_FOLDER
+    )
+    _migrate_subdir_rename(
+        exempt_dir, LEGACY_MERGE_REMOVE_DUP_SUBPROCESS_FOLDER, MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+    )
+    _migrate_subdir_rename(
+        exempt_dir, LEGACY_FINAL_EXEMPT_SUBPROCESS_FOLDER, FINAL_EXEMPT_SUBPROCESS_FOLDER
+    )
+
+    # Exempt Query sub-process roots
+    (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        / MERGE_NORMALIZE_LC_ETC_FOLDER
+    ).mkdir(parents=True, exist_ok=True)
+    (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        / MERGE_NORMALIZE_VRN_FOLDER
+    ).mkdir(parents=True, exist_ok=True)
+    (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+    ).mkdir(parents=True, exist_ok=True)
+    (
+        FILE_PROCESS_DIR
+        / EXEMPT_QUERY_PARENT_FOLDER
+        / FINAL_EXEMPT_SUBPROCESS_FOLDER
+    ).mkdir(parents=True, exist_ok=True)
+
+
 def migrate_valid_invalid_parent_folder():
     """Rename legacy Merge_Valid_Lookup to Valid_Invalid_Process when safe."""
     legacy = FILE_PROCESS_DIR / LEGACY_VALID_INVALID_PARENT_FOLDER
@@ -164,33 +234,18 @@ def migrate_valid_invalid_parent_folder():
         except OSError:
             pass
     current.mkdir(parents=True, exist_ok=True)
+    _migrate_subdir_rename(
+        current, LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER, LIFE_CYCLE_SUBPROCESS_FOLDER
+    )
+    _migrate_subdir_rename(
+        current, LEGACY_VALID_INVALID_SUBPROCESS_FOLDER, VALID_INVALID_SUBPROCESS_FOLDER
+    )
     for subprocess in (LIFE_CYCLE_SUBPROCESS_FOLDER, VALID_INVALID_SUBPROCESS_FOLDER):
         (current / subprocess).mkdir(parents=True, exist_ok=True)
 
 
-migrate_valid_invalid_parent_folder()
-(
-    FILE_PROCESS_DIR
-    / EXEMPT_QUERY_PARENT_FOLDER
-    / MERGE_NORMALIZE_SUBPROCESS_FOLDER
-    / MERGE_NORMALIZE_LC_ETC_FOLDER
-).mkdir(parents=True, exist_ok=True)
-(
-    FILE_PROCESS_DIR
-    / EXEMPT_QUERY_PARENT_FOLDER
-    / MERGE_NORMALIZE_SUBPROCESS_FOLDER
-    / MERGE_NORMALIZE_VRN_FOLDER
-).mkdir(parents=True, exist_ok=True)
-(
-    FILE_PROCESS_DIR
-    / EXEMPT_QUERY_PARENT_FOLDER
-    / MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
-).mkdir(parents=True, exist_ok=True)
-(
-    FILE_PROCESS_DIR
-    / EXEMPT_QUERY_PARENT_FOLDER
-    / FINAL_EXEMPT_SUBPROCESS_FOLDER
-).mkdir(parents=True, exist_ok=True)
+ensure_file_process_default_dirs()
+
 
 def valid_invalid_parent_dir():
     """Resolved Valid/Invalid Process parent folder (prefers new name, falls back to legacy)."""
@@ -207,22 +262,85 @@ def is_valid_invalid_parent_folder(folder_name):
     return folder_name in (VALID_INVALID_PARENT_FOLDER, LEGACY_VALID_INVALID_PARENT_FOLDER)
 
 
+def is_life_cycle_subprocess_folder(folder_name):
+    return folder_name in (
+        LIFE_CYCLE_SUBPROCESS_FOLDER,
+        LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER,
+    )
+
+
+def is_valid_invalid_subprocess_folder(folder_name):
+    return folder_name in (
+        VALID_INVALID_SUBPROCESS_FOLDER,
+        LEGACY_VALID_INVALID_SUBPROCESS_FOLDER,
+    )
+
+
+def is_merge_normalize_subprocess_folder(folder_name):
+    return folder_name in (
+        MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+        LEGACY_MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+    )
+
+
+def is_merge_remove_dup_subprocess_folder(folder_name):
+    return folder_name in (
+        MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+        LEGACY_MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+    )
+
+
+def is_final_exempt_subprocess_folder(folder_name):
+    return folder_name in (
+        FINAL_EXEMPT_SUBPROCESS_FOLDER,
+        LEGACY_FINAL_EXEMPT_SUBPROCESS_FOLDER,
+    )
+
+
 def get_valid_invalid_process_paths(subprocess_folder, process_name):
     """Resolve process folders under Valid/Invalid Process (new or legacy parent name)."""
-    safe_subprocess = secure_filename((subprocess_folder or "").strip())
+    raw_subprocess = (subprocess_folder or "").strip()
     safe_process_name = secure_filename((process_name or "").strip())
-    if not safe_subprocess or not safe_process_name:
+    if not raw_subprocess or not safe_process_name:
         return None, None
 
+    # Accept indexed or legacy sub-process folder names.
+    if raw_subprocess in (
+        LIFE_CYCLE_SUBPROCESS_FOLDER,
+        LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER,
+        secure_filename(LIFE_CYCLE_SUBPROCESS_FOLDER),
+        secure_filename(LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER),
+    ):
+        subprocess_candidates = (
+            LIFE_CYCLE_SUBPROCESS_FOLDER,
+            LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER,
+        )
+        canonical_subprocess = LIFE_CYCLE_SUBPROCESS_FOLDER
+    elif raw_subprocess in (
+        VALID_INVALID_SUBPROCESS_FOLDER,
+        LEGACY_VALID_INVALID_SUBPROCESS_FOLDER,
+        secure_filename(VALID_INVALID_SUBPROCESS_FOLDER),
+        secure_filename(LEGACY_VALID_INVALID_SUBPROCESS_FOLDER),
+    ):
+        subprocess_candidates = (
+            VALID_INVALID_SUBPROCESS_FOLDER,
+            LEGACY_VALID_INVALID_SUBPROCESS_FOLDER,
+        )
+        canonical_subprocess = VALID_INVALID_SUBPROCESS_FOLDER
+    else:
+        subprocess_candidates = (raw_subprocess,)
+        canonical_subprocess = raw_subprocess
+
     for parent_name in (VALID_INVALID_PARENT_FOLDER, LEGACY_VALID_INVALID_PARENT_FOLDER):
-        process_dir = FILE_PROCESS_DIR / parent_name / safe_subprocess / safe_process_name
-        if process_dir.exists():
-            return process_dir, process_dir / "input"
+        for sub_name in subprocess_candidates:
+            process_dir = FILE_PROCESS_DIR / parent_name / sub_name / safe_process_name
+            if process_dir.exists():
+                return process_dir, process_dir / "input"
 
     process_dir = (
         FILE_PROCESS_DIR
         / VALID_INVALID_PARENT_FOLDER
-        / safe_subprocess
+        / canonical_subprocess
         / safe_process_name
     )
     return process_dir, process_dir / "input"
@@ -249,8 +367,8 @@ def list_available_processes():
 
     parent_dir = valid_invalid_parent_dir()
     for subprocess, subprocess_label in (
-        (LIFE_CYCLE_SUBPROCESS_FOLDER, "Life Cycle Merge"),
-        (VALID_INVALID_SUBPROCESS_FOLDER, "Valid/Invalid Lookup"),
+        (LIFE_CYCLE_SUBPROCESS_FOLDER, LIFE_CYCLE_SUBPROCESS_LABEL),
+        (VALID_INVALID_SUBPROCESS_FOLDER, VALID_INVALID_SUBPROCESS_LABEL),
     ):
         subprocess_dir = parent_dir / subprocess
         if subprocess_dir.is_dir():
@@ -291,9 +409,18 @@ def list_available_processes():
                         proc_dir,
                     )
 
+    # Keep numbered sub-process order within each parent group.
+    parent_order = {
+        VALID_INVALID_GROUP_LABEL: 0,
+        EXEMPT_QUERY_GROUP_LABEL: 1,
+    }
     return sorted(
         items,
-        key=lambda row: (row["parent_label"], row["subprocess_label"], row["process_name"].lower()),
+        key=lambda row: (
+            parent_order.get(row["parent_label"], 99),
+            row["subprocess_label"],
+            row["process_name"].lower(),
+        ),
     )
 
 
@@ -604,7 +731,7 @@ def resolve_merge_remove_dup_output_import(relative_path):
     if (
         len(parts) != 5
         or parts[0] != EXEMPT_QUERY_PARENT_FOLDER
-        or parts[1] != MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        or not is_merge_remove_dup_subprocess_folder(parts[1])
         or parts[3] != "output"
     ):
         return None
@@ -720,7 +847,7 @@ def resolve_merge_normalize_output_import(relative_path, expected_kind):
     if (
         len(rel_parts) < 6
         or rel_parts[0] != EXEMPT_QUERY_PARENT_FOLDER
-        or rel_parts[1] != MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        or not is_merge_normalize_subprocess_folder(rel_parts[1])
         or rel_parts[2] != kind
         or rel_parts[4] != "output"
     ):
@@ -747,7 +874,7 @@ def parse_input_folder_context(input_path):
     if (
         len(parts) >= 5
         and parts[0] == EXEMPT_QUERY_PARENT_FOLDER
-        and parts[1] == MERGE_NORMALIZE_SUBPROCESS_FOLDER
+        and is_merge_normalize_subprocess_folder(parts[1])
         and parts[-1] == "input"
     ):
         file_kind = normalize_merge_normalize_file_kind(parts[2])
@@ -755,25 +882,25 @@ def parse_input_folder_context(input_path):
             return None
         return {
             "parent_folder": parts[0],
-            "subprocess_folder": parts[1],
+            "subprocess_folder": MERGE_NORMALIZE_SUBPROCESS_FOLDER,
             "file_kind": file_kind,
             "process_name": parts[3],
-            "process_type": parts[1],
+            "process_type": MERGE_NORMALIZE_SUBPROCESS_FOLDER,
             "process_dir": input_path.parent,
         }
 
     if (
         len(parts) >= 4
         and parts[0] == EXEMPT_QUERY_PARENT_FOLDER
-        and parts[1] == MERGE_REMOVE_DUP_SUBPROCESS_FOLDER
+        and is_merge_remove_dup_subprocess_folder(parts[1])
         and parts[-1] == "input"
     ):
         return {
             "parent_folder": parts[0],
-            "subprocess_folder": parts[1],
+            "subprocess_folder": MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
             "file_kind": None,
             "process_name": parts[2],
-            "process_type": parts[1],
+            "process_type": MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
             "process_dir": input_path.parent,
         }
 
@@ -839,13 +966,21 @@ RESERVED_PROCESS_NAMES = {
     LEGACY_VALID_INVALID_PARENT_FOLDER.lower(),
     LIFE_CYCLE_SUBPROCESS_FOLDER.lower(),
     VALID_INVALID_SUBPROCESS_FOLDER.lower(),
+    LEGACY_LIFE_CYCLE_SUBPROCESS_FOLDER.lower(),
+    LEGACY_VALID_INVALID_SUBPROCESS_FOLDER.lower(),
     EXEMPT_QUERY_PARENT_FOLDER.lower(),
     MERGE_NORMALIZE_SUBPROCESS_FOLDER.lower(),
+    LEGACY_MERGE_NORMALIZE_SUBPROCESS_FOLDER.lower(),
     "merge__normalize",
     "merge_and_normalize",
+    "1_merge__normalize",
     MERGE_REMOVE_DUP_SUBPROCESS_FOLDER.lower(),
+    LEGACY_MERGE_REMOVE_DUP_SUBPROCESS_FOLDER.lower(),
     "merge__remove_duplicate",
     "merge_and_remove_duplicate",
+    "2_merge__remove_duplicate",
+    FINAL_EXEMPT_SUBPROCESS_FOLDER.lower(),
+    LEGACY_FINAL_EXEMPT_SUBPROCESS_FOLDER.lower(),
     MERGE_NORMALIZE_LC_ETC_FOLDER.lower(),
     MERGE_REMOVE_DUP_LC_SLOT.lower(),
     "lc",
@@ -1032,7 +1167,7 @@ def resolve_lcm_output_import_file(relative_path):
         return None
     if (
         not is_valid_invalid_parent_folder(rel_parts[0])
-        or rel_parts[1] != LIFE_CYCLE_SUBPROCESS_FOLDER
+        or not is_life_cycle_subprocess_folder(rel_parts[1])
         or rel_parts[3] != "output"
     ):
         return None
@@ -2032,10 +2167,17 @@ def inject_process_labels():
         "merge_valid_lookup_group_label": VALID_INVALID_GROUP_LABEL,
         "valid_invalid_parent_folder": VALID_INVALID_PARENT_FOLDER,
         "merge_valid_lookup_parent_folder": VALID_INVALID_PARENT_FOLDER,
+        "life_cycle_subprocess_label": LIFE_CYCLE_SUBPROCESS_LABEL,
+        "valid_invalid_subprocess_label": VALID_INVALID_SUBPROCESS_LABEL,
+        "life_cycle_subprocess_folder": LIFE_CYCLE_SUBPROCESS_FOLDER,
+        "valid_invalid_subprocess_folder": VALID_INVALID_SUBPROCESS_FOLDER,
         "merge_normalize_group_label": MERGE_NORMALIZE_GROUP_LABEL,
         "merge_remove_dup_group_label": MERGE_REMOVE_DUP_GROUP_LABEL,
         "final_exempt_group_label": FINAL_EXEMPT_GROUP_LABEL,
         "exempt_query_parent_folder": EXEMPT_QUERY_PARENT_FOLDER,
+        "merge_normalize_folder": MERGE_NORMALIZE_SUBPROCESS_FOLDER,
+        "merge_remove_dup_folder": MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
+        "final_exempt_folder": FINAL_EXEMPT_SUBPROCESS_FOLDER,
         "merge_normalize_file_kind_labels": MERGE_NORMALIZE_FILE_KIND_LABELS,
     }
 
@@ -2047,7 +2189,12 @@ def home():
 
 @app.route("/merge-valid-lookup")
 def merge_valid_lookup_hub():
-    return render_template("merge_valid_lookup_hub.html")
+    return render_template(
+        "merge_valid_lookup_hub.html",
+        merge_valid_lookup_group_label=VALID_INVALID_GROUP_LABEL,
+        life_cycle_subprocess_label=LIFE_CYCLE_SUBPROCESS_LABEL,
+        valid_invalid_subprocess_label=VALID_INVALID_SUBPROCESS_LABEL,
+    )
 
 
 @app.route("/exempt-query")
@@ -2058,6 +2205,9 @@ def exempt_query_hub():
         merge_normalize_folder=MERGE_NORMALIZE_SUBPROCESS_FOLDER,
         merge_remove_dup_folder=MERGE_REMOVE_DUP_SUBPROCESS_FOLDER,
         final_exempt_folder=FINAL_EXEMPT_SUBPROCESS_FOLDER,
+        merge_normalize_group_label=MERGE_NORMALIZE_GROUP_LABEL,
+        merge_remove_dup_group_label=MERGE_REMOVE_DUP_GROUP_LABEL,
+        final_exempt_group_label=FINAL_EXEMPT_GROUP_LABEL,
     )
 
 

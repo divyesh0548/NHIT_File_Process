@@ -16,14 +16,14 @@
 
 <section class="grid cols-2">
     <article class="card">
-        <h3 class="card-title">Life Cycle Merge</h3>
+        <h3 class="card-title">{{ life_cycle_subprocess_label }}</h3>
         <p>Upload monthly source files, keep process folders organized, and trigger the merge submit flow.</p>
         <div class="actions">
             <a class="btn" href="{{ url_for('life_cycle_merge') }}">Open</a>
         </div>
     </article>
     <article class="card">
-        <h3 class="card-title">Valid/Invalid Lookup</h3>
+        <h3 class="card-title">{{ valid_invalid_subprocess_label }}</h3>
         <p>Upload merged life cycle and rates files, map headers, and run the valid/invalid lookup process.</p>
         <div class="actions">
             <a class="btn" href="{{ url_for('valid_invalid_lookup') }}">Open</a>

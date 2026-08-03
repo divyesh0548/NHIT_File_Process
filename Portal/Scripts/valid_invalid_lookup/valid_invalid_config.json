@@ -50,11 +50,7 @@
   "RATE_SHEET_JOURNEY_COLUMN_RENAMES": {
     "Local Conti/Local Single": "Local Conti/Single",
     "Return Journey": "Cont. Journey",
-    "SINGLE": "Single Journey",
-    "SINGLE JOURNEY": "Single Journey",
-    "Single": "Single Journey",
-    "Single journey": "Single Journey",
-    "SingleJourney": "Single Journey"
+    "Single journey": "Single Journey"
   },
   "RATE_SHEET_ID_COLUMN_ALIASES": {
     "TC Class": [

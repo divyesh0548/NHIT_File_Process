@@ -49,7 +49,7 @@
     <div class="section-head">
         <div>
             <span class="process-parent-badge status-parent-badge">{{ valid_invalid_group_label }}</span>
-            <h2>Life Cycle Merge Process</h2>
+            <h2>{{ life_cycle_subprocess_label }} Process</h2>
             <p id="merge-status-text">
                 {% if life_cycle_state.running %}
                     Processing is ongoing for "{{ life_cycle_state.process_name }}".
@@ -74,7 +74,7 @@
     <div class="section-head">
         <div>
             <span class="process-parent-badge status-parent-badge">{{ valid_invalid_group_label }}</span>
-            <h2>Valid/Invalid Lookup Process</h2>
+            <h2>{{ valid_invalid_subprocess_label }} Process</h2>
             <p id="valid-invalid-status-text">
                 {% if valid_invalid_state.running %}
                     Processing is ongoing for "{{ valid_invalid_state.process_name }}".

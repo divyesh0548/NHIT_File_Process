@@ -115,7 +115,7 @@
                         <p class="muted">Submit stays disabled until both VRN and LC/ETC files are attached to this process.</p>
                     {% endif %}
                     <div class="actions">
-                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Start Merge + Remove Duplicate</button>
+                        <button class="btn" type="submit" name="action" value="process" {% if not submit_ready %}disabled{% endif %}>Start {{ merge_remove_dup_group_label }}</button>
                     </div>
                 </div>
             </article>

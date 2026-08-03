@@ -80,11 +80,7 @@ _DEFAULT_VALUES: Dict[str, Any] = {
         "Return Journey": "Cont. Journey",
         "Local Conti/Local Single": "Local Conti/Single",
         # Sheet column aliases → canonical Attribute used after melt / rate lookup.
-        "Single": "Single Journey",
-        "SINGLE": "Single Journey",
-        "SingleJourney": "Single Journey",
         "Single journey": "Single Journey",
-        "SINGLE JOURNEY": "Single Journey",
     },
     # Aliases for the three fixed identity columns on the rates sheet.
     # Canonical keys cannot be removed; users add alternate header spellings under each.
