@@ -5,8 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 # ──────────────── Configuration ────────────────
-FOLDER_PATH = r"C:\Divyesh\NHIT_File_process\Exempt Query\Madai base files\pass"
-COLUMN_NAME = "Pass Type"
+FOLDER_PATH = r"C:\Divyesh\NHIT_File_process\Exempt Query\Nathavalsa\Pass issuance report from Bank Portal"
+COLUMN_NAME = "Pass Scheme"
 # ───────────────────────────────────────────────
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}

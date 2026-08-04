@@ -204,7 +204,11 @@ def get_last_used_row_col(ws):
 def normalize_csv_file(file_path: Path, lookup: Dict[str, str]) -> int:
     encoding = _detect_encoding(file_path)
     data_rows_written = 0
-    temp_fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    temp_fd, temp_path = tempfile.mkstemp(
+        suffix=".csv",
+        prefix=f".{file_path.stem}_",
+        dir=str(file_path.parent),
+    )
     os.close(temp_fd)
 
     with file_path.open("r", encoding=encoding, newline="") as src, open(

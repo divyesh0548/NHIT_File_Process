@@ -512,7 +512,11 @@ def normalize_csv_file_fast(file_path: Path, normalization_lookup):
     )
     total_changes = 0
 
-    temp_fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    temp_fd, temp_path = tempfile.mkstemp(
+        suffix=".csv",
+        prefix=f".{file_path.stem}_",
+        dir=str(file_path.parent),
+    )
     os.close(temp_fd)
 
     with (

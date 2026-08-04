@@ -1,17 +1,17 @@
 {
-  "folder": "C:\\Divyesh\\NHIT_File_process\\Exempt Query\\Madai base files\\pass",
-  "column": "Pass Type",
+  "folder": "C:\\Divyesh\\NHIT_File_process\\Exempt Query\\Nathavalsa\\Pass issuance report from Bank Portal",
+  "column": "Pass Scheme",
   "distinct_count": 2,
   "values": [
     {
-      "Value": "LT",
+      "Value": "Local Non Commercial",
       "File Count": 3,
-      "Files": "Pass Issuance Report April-2026.csv, Pass Issuance Report June-2026.csv, Pass Issuance Report May-2026.csv"
+      "Files": "PASS ISSUANCE REPORT 01-05-2026 TO 31-05-2026.xlsx, PASS ISSUANCE REPORT JUNE 2026.xlsx, Pass Status Report ISSUANCE POS  APRIL 2026.xlsx"
     },
     {
-      "Value": "MP",
+      "Value": "Monthly Pass",
       "File Count": 3,
-      "Files": "Pass Issuance Report April-2026.csv, Pass Issuance Report June-2026.csv, Pass Issuance Report May-2026.csv"
+      "Files": "PASS ISSUANCE REPORT 01-05-2026 TO 31-05-2026.xlsx, PASS ISSUANCE REPORT JUNE 2026.xlsx, Pass Status Report ISSUANCE POS  APRIL 2026.xlsx"
     }
   ]
 }

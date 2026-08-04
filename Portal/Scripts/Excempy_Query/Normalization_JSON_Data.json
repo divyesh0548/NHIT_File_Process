@@ -62,7 +62,8 @@
     "DESC",
     "DESCRIPTION",
     "Remarks",
-    "Remark"
+    "Remark",
+    "TLC_Remark"
   ],
   "File Name": [
     "FILENAME",
