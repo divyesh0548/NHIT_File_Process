@@ -1,6 +1,6 @@
 import pandas as pd
 from config import get_return_journey_input_path, output_path, put_file_name
-from data_processing import SIDE_1_LANES, SIDE_2_LANES
+from data_processing import allocate_side_lanes, map_lane_to_side
 
 input_path = get_return_journey_input_path()
 df = pd.read_excel(input_path, sheet_name="Combined with RF 3", header=0)
@@ -8,16 +8,8 @@ df = pd.read_excel(input_path, sheet_name="Combined with RF 3", header=0)
 df["Date & Time"] = pd.to_datetime(df["Date & Time"], errors="coerce")
 df = df.sort_values(by=["Veh Reg No.", "Date & Time"])
 
-
-def determine_side(lane_no):
-    if lane_no in SIDE_1_LANES:
-        return "Side 1"
-    if lane_no in SIDE_2_LANES:
-        return "Side 2"
-    return "Unknown"
-
-
-df["Side"] = df["Lane No"].apply(determine_side)
+allocate_side_lanes(df["Lane No"])
+df["Side"] = df["Lane No"].apply(map_lane_to_side)
 
 journey_type = []
 for i in range(len(df)):
