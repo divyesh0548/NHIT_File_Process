@@ -1,0 +1,5 @@
+Run "Aprooved Exemption (1).py" if approved Exemption otherwise "Classwise Annexure Single rate file.py"
+
+For some plaza run approver vioaltion.
+
+Keep the rates file selectable. No need to upload. All plaza rate are available.

@@ -29,6 +29,10 @@
 ~$*.xls*
 ~$*.xlsx
 
+# Other docs & files
+*.pdf
+
+
 # --- Archives ---
 *.zip
 *.rar

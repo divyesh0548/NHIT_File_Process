@@ -1,5 +1,0 @@
-As of for Daroda plaza Jan-Apr 2026
-
-Convert to CSV + Normalize + Merge VRN of 4 months = 1200 Seconds
-
-Convert to CSV + Normalize + Merge = 600 Seconds

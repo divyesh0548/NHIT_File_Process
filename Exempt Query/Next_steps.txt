@@ -1,1 +1,0 @@
-Find out which columns are required from Pass file, because all files have different column names and it causes merge conflicts.

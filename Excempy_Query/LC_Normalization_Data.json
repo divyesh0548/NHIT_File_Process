@@ -1,0 +1,70 @@
+{
+  "Date & Time": [
+    "DATE",
+    "Date Time",
+    "Reader Read Time",
+    "DATETIME",
+    "DATE TIME",
+    "Date/Time",
+    "Transaction Date",
+    "Txn Date",
+    "TXN DATE"
+  ],
+  "Settlement Type": [
+    "SettlementType",
+    "SETTLEMENT TYPE",
+    "Settlement"
+  ],
+  "Transaction Status": [
+    "Transaction Status",
+    "TRANSACTION STATUS",
+    "TransactionStatus",
+    "Txn Status"
+  ],
+  "Veh Reg No.": [
+    "TC_VEH_REG_NO",
+    "Vehicle Reg. No.",
+    "Vehicle Reg. No",
+    "VEHICLE_REG_NO",
+    "veh_reg_no_",
+    "Veh Reg No.",
+    "VEH REG NO",
+    "TC VEH REG NO",
+    "VEH. REG. NO.",
+    "Licence Plate No",
+    "VRN",
+    "Licence Plate No.",
+    "Plate No",
+    "NPCI VRN",
+    "Veh Reg Num",
+    "VehicleNumber",
+    "VEH_REG_NO",
+    "Platenumber",
+    "Vehicle Registration Number",
+    "vehicle_reg_no",
+    "Vehicle No"
+  ],
+  "MOP": [
+    "PAYMENT_TYPE",
+    "Payment Method",
+    "MVC MOP",
+    "PAYMENT TYPE",
+    "Payment",
+    "Mode",
+    "Ticket_Type",
+    "MVC_TLC_MOP",
+    "TransactionTypeTC",
+    "PaymentMeans",
+    "PAYMENT METHOD",
+    "MVC (TLC MOP)",
+    "MVC TLC MOP"
+  ],
+  "Lane No": [
+    "LANE NO",
+    "LaneNo",
+    "Lane ID",
+    "Lane Number",
+    "LANE_NUMBER",
+    "Lane"
+  ]
+}

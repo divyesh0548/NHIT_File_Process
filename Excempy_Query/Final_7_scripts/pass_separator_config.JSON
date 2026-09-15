@@ -1,0 +1,60 @@
+{
+    "HEADER_KEYWORDS": [
+      "Chassis/ Vehicle No",
+      "NPCI Vehicle Class",
+      "Start Date",
+      "Plaza Name",
+      "End Date",
+      "Mobile No",
+      "Pass Type",
+      "Payment Mode",
+      "Agency Code",
+      "Vehicle Reg No",
+      "Issued Date",
+      "Transaction ID",
+      "Pass Scheme"
+    ],
+    "PASS_TYPE_COLUMN_NAMES": [
+      "Pass Type",
+      "PassType",
+      "PASS_TYPE",
+      "Pass Scheme"
+    ],
+    "MP_PASS_TYPE_VALUES": [
+      "MP",
+      "LP",
+      "MLP",
+      "Monthly pass",
+      "Local 20 Km VC4 (350)",
+      "Local20KM"
+    ],
+    "LT_PASS_TYPE_VALUES": [
+      "LT",
+      "Local Commercial Tariff 50%",
+      "50 % discount for local Comm",
+      "Local Non Commercial"
+    ],
+    "PASS_CHASSIS_COLUMN_NAMES": [
+      "Chassis/ Vehicle No",
+      "Chassis/Vehicle No",
+      "Chassis Vehicle No",
+      "Vehicle No",
+      "Vehicle Reg No",
+      "Veh Reg No"
+    ],
+    "PASS_START_DATE_COLUMN_NAMES": [
+      "Start Date",
+      "Start Effective Date",
+      "Validity Start Date",
+      "Start Date-Time"
+    ],
+    "PASS_END_DATE_COLUMN_NAMES": [
+      "End Date",
+      "End Effective Date",
+      "Validity End Date",
+      "End Date-Time"
+    ],
+    "HEADER_SCAN_ROWS": 25,
+    "MIN_HEADER_MATCHES": 3
+  }
+  
